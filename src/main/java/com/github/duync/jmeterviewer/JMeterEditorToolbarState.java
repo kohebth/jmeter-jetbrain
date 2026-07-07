@@ -7,6 +7,9 @@ final class JMeterEditorToolbarState {
     JButton saveButton;
     JButton reloadButton;
     JButton runButton;
+    JButton runLocalButton;
+    JButton runRemoteButton;
+    JButton runAllButton;
     JButton stopButton;
     JButton shutdownButton;
     JButton resetEnginesButton;
@@ -24,6 +27,9 @@ final class JMeterEditorToolbarState {
     JMeterEditorToolbarState(JButton saveButton,
                              JButton reloadButton,
                              JButton runButton,
+                             JButton runLocalButton,
+                             JButton runRemoteButton,
+                             JButton runAllButton,
                              JButton stopButton,
                              JButton shutdownButton,
                              JButton resetEnginesButton,
@@ -40,6 +46,9 @@ final class JMeterEditorToolbarState {
         this.saveButton = saveButton;
         this.reloadButton = reloadButton;
         this.runButton = runButton;
+        this.runLocalButton = runLocalButton;
+        this.runRemoteButton = runRemoteButton;
+        this.runAllButton = runAllButton;
         this.stopButton = stopButton;
         this.shutdownButton = shutdownButton;
         this.resetEnginesButton = resetEnginesButton;

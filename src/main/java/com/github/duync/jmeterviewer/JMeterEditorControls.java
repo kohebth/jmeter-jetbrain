@@ -10,6 +10,9 @@ final class JMeterEditorControls {
                      JButton saveButton,
                      JButton reloadButton,
                      JButton runButton,
+                     JButton runLocalButton,
+                     JButton runRemoteButton,
+                     JButton runAllButton,
                      JButton stopButton,
                      JButton shutdownButton,
                      JButton resetEnginesButton,
@@ -17,6 +20,9 @@ final class JMeterEditorControls {
                      Runnable save,
                      Runnable reload,
                      Runnable run,
+                     Runnable runLocal,
+                     Runnable runRemote,
+                     Runnable runAll,
                      JMeterRunController runController,
                      JMeterValidationAction validationAction,
                      Runnable commands) {
@@ -24,6 +30,9 @@ final class JMeterEditorControls {
         reloadButton.addActionListener(event -> reload.run());
         saveButton.setEnabled(false);
         runButton.addActionListener(event -> run.run());
+        runLocalButton.addActionListener(event -> runLocal.run());
+        runRemoteButton.addActionListener(event -> runRemote.run());
+        runAllButton.addActionListener(event -> runAll.run());
         stopButton.addActionListener(event -> runController.stop());
         shutdownButton.addActionListener(event -> runController.shutdown());
         resetEnginesButton.addActionListener(event -> runController.resetEngines());

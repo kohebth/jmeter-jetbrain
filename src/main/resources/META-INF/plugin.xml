@@ -30,6 +30,10 @@
                 id="JMeter Results"
                 anchor="right"
                 factoryClass="com.github.duync.jmeterviewer.JMeterResultsToolWindowFactory"/>
+        <toolWindow
+                id="JMeter Tools"
+                anchor="bottom"
+                factoryClass="com.github.duync.jmeterviewer.JMeterToolsToolWindowFactory"/>
     </extensions>
 
     <actions>

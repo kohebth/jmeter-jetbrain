@@ -26,6 +26,10 @@ final class JMeterRunController {
     }
 
     void start(JMeterTreeModel model, JMeterRunOptions options) {
+        start(model, options, RunTarget.AUTO);
+    }
+
+    void start(JMeterTreeModel model, JMeterRunOptions options, RunTarget target) {
         if (!running.compareAndSet(false, true)) {
             return;
         }
@@ -41,17 +45,24 @@ final class JMeterRunController {
             }
 
             HashTree testTree = JMeterTreeLoader.toHashTree(model);
-            EditorResultCollector collector = new EditorResultCollector(listener, () -> running.set(false));
+            engines.clear();
+            engines.addAll(createEngines(options, target));
+            if (engines.isEmpty()) {
+                running.set(false);
+                notifyStatus("Idle");
+                SwingUtilities.invokeLater(() -> listener.log("No JMeter engines configured"));
+                return;
+            }
+            RunLifecycle lifecycle = new RunLifecycle(listener, running, engines.size());
+            EditorResultCollector collector = new EditorResultCollector(listener, lifecycle);
             if (options != null && options.resultFile() != null) {
                 collector.setFilename(options.resultFile());
             }
             testTree.add(collector);
-            engines.clear();
-            engines.addAll(createEngines(options));
             for (JMeterEngine engine : engines) {
                 engine.configure(testTree);
             }
-            notifyStatus("Running");
+            notifyStatus("Starting " + (target == null ? RunTarget.AUTO : target).label());
             for (JMeterEngine engine : engines) {
                 engine.runTest();
             }
@@ -109,17 +120,23 @@ final class JMeterRunController {
         SwingUtilities.invokeLater(() -> listener.log("Exited JMeter engines"));
     }
 
-    private java.util.List<JMeterEngine> createEngines(JMeterRunOptions options) throws Exception {
+    private java.util.List<JMeterEngine> createEngines(JMeterRunOptions options, RunTarget target) throws Exception {
         java.util.List<String> hosts = options == null ? Collections.emptyList() : options.remoteHosts();
-        if (hosts.isEmpty()) {
-            return Collections.singletonList(new StandardJMeterEngine());
+        RunTarget resolved = target == null ? RunTarget.AUTO : target;
+        java.util.List<JMeterEngine> selected = new ArrayList<>();
+        if (resolved.includesLocal(hosts)) {
+            selected.add(new StandardJMeterEngine());
+            SwingUtilities.invokeLater(() -> listener.log("Configured local engine"));
         }
-        java.util.List<JMeterEngine> remoteEngines = new ArrayList<>();
-        for (String host : hosts) {
-            remoteEngines.add(new ClientJMeterEngine(host));
-            SwingUtilities.invokeLater(() -> listener.log("Configured remote engine " + host));
+        if (resolved.includesRemote(hosts)) {
+            for (String host : hosts) {
+                selected.add(new ClientJMeterEngine(host));
+                SwingUtilities.invokeLater(() -> listener.log("Configured remote engine " + host));
+            }
+        } else if (resolved.requiresRemote()) {
+            SwingUtilities.invokeLater(() -> listener.log("No remote hosts configured"));
         }
-        return remoteEngines;
+        return selected;
     }
 
     private void stopAll(boolean now, String status) {
@@ -141,30 +158,96 @@ final class JMeterRunController {
         void sampleOccurred(SampleResult result);
     }
 
+    enum RunTarget {
+        AUTO("test"),
+        LOCAL("local test"),
+        REMOTE("remote test"),
+        LOCAL_AND_REMOTE("local and remote test");
+
+        private final String label;
+
+        RunTarget(String label) {
+            this.label = label;
+        }
+
+        private String label() {
+            return label;
+        }
+
+        private boolean includesLocal(java.util.List<String> hosts) {
+            return this == LOCAL || this == LOCAL_AND_REMOTE || (this == AUTO && hosts.isEmpty());
+        }
+
+        private boolean includesRemote(java.util.List<String> hosts) {
+            return !hosts.isEmpty() && (this == REMOTE || this == LOCAL_AND_REMOTE || this == AUTO);
+        }
+
+        private boolean requiresRemote() {
+            return this == REMOTE || this == LOCAL_AND_REMOTE;
+        }
+    }
+
+    private static final class RunLifecycle {
+        private final Listener listener;
+        private final AtomicBoolean running;
+        private final java.util.concurrent.atomic.AtomicInteger remaining;
+
+        private RunLifecycle(Listener listener, AtomicBoolean running, int engines) {
+            this.listener = listener;
+            this.running = running;
+            this.remaining = new java.util.concurrent.atomic.AtomicInteger(engines);
+        }
+
+        private void started(String host) {
+            SwingUtilities.invokeLater(() -> {
+                listener.statusChanged("Running");
+                listener.log("Test started" + suffix(host));
+            });
+        }
+
+        private void ended(String host) {
+            int left = remaining.updateAndGet(value -> Math.max(0, value - 1));
+            if (left == 0) {
+                running.set(false);
+            }
+            SwingUtilities.invokeLater(() -> {
+                listener.log("Test finished" + suffix(host));
+                listener.statusChanged(left == 0 ? "Finished" : "Running (" + left + " engines)");
+            });
+        }
+
+        private String suffix(String host) {
+            return host == null || host.trim().isEmpty() ? "" : " on " + host;
+        }
+    }
+
     private static final class EditorResultCollector extends ResultCollector {
         private final Listener listener;
-        private final Runnable finished;
+        private final RunLifecycle lifecycle;
 
-        private EditorResultCollector(Listener listener, Runnable finished) {
+        private EditorResultCollector(Listener listener, RunLifecycle lifecycle) {
             this.listener = listener;
-            this.finished = finished;
+            this.lifecycle = lifecycle;
         }
 
         @Override
         public void testStarted() {
-            SwingUtilities.invokeLater(() -> {
-                listener.statusChanged("Running");
-                listener.log("Test started");
-            });
+            lifecycle.started(null);
+        }
+
+        @Override
+        public void testStarted(String host) {
+            lifecycle.started(host);
         }
 
         @Override
         public void testEnded() {
-            finished.run();
-            SwingUtilities.invokeLater(() -> {
-                listener.statusChanged("Finished");
-                listener.log("Test finished");
-            });
+            lifecycle.ended(null);
+        }
+
+        @Override
+        public void testEnded(String host) {
+            lifecycle.ended(host);
         }
 
         @Override
