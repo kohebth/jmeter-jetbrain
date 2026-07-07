@@ -14,6 +14,7 @@ import org.apache.jmeter.gui.GuiPackage;
 import org.apache.jmeter.gui.tree.JMeterTreeListener;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.gui.tree.JMeterTreeNode;
+import org.apache.jmeter.testelement.TestElement;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -150,7 +151,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         JMeterTreeActions treeActions = new JMeterTreeActions(model, this::markTreeModified);
 
         JMeterTreeListener listener = new JMeterTreeListener(model);
-        listener.setActionHandler(event -> elementPanel.showSelected());
+        listener.setActionHandler(event -> showSelectedElement());
         GuiPackage.initInstance(listener, model);
 
         tree = JMeterTreeView.create(model, listener, treeActions, this::markTreeModified);
@@ -224,9 +225,31 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         resultsPanel.clear();
         resultsPanel.appendDiagnostic("Starting test");
         resultsPanel.runStarted();
-        resultsWorkspace.show();
+        resultsWorkspace.showViewResultsTree();
         setRunStatus("Starting");
         runController.start(model, runOptions, target);
+    }
+
+    private void showSelectedElement() {
+        elementPanel.showSelected();
+        if (isViewResultsTreeSelected()) {
+            resultsWorkspace.showViewResultsTree();
+        }
+    }
+
+    private boolean isViewResultsTreeSelected() {
+        GuiPackage guiPackage = GuiPackage.getInstance();
+        if (guiPackage == null || guiPackage.getCurrentNode() == null) {
+            return false;
+        }
+        Object object = guiPackage.getCurrentNode().getUserObject();
+        if (!(object instanceof TestElement)) {
+            return false;
+        }
+        TestElement element = (TestElement) object;
+        return "ViewResultsFullVisualizer".equals(element.getPropertyAsString(TestElement.GUI_CLASS))
+                || "org.apache.jmeter.visualizers.ViewResultsFullVisualizer"
+                .equals(element.getPropertyAsString(TestElement.GUI_CLASS));
     }
 
     void stopTest() { runController.stop(); }

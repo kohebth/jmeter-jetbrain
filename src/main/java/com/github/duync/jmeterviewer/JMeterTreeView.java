@@ -7,9 +7,12 @@ import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.gui.tree.JMeterTreeNode;
 
 import javax.swing.*;
+import javax.swing.event.MenuEvent;
+import javax.swing.event.MenuListener;
 import javax.swing.tree.TreeSelectionModel;
 import javax.swing.tree.TreePath;
 import java.awt.event.*;
+import java.util.*;
 
 final class JMeterTreeView {
     private JMeterTreeView() {
@@ -132,18 +135,25 @@ final class JMeterTreeView {
         private JMenu createAddMenu() {
             JMenu addMenu = new JMenu("Add");
             JMeterTreeNode selected = actions.selectedNode();
+            Map<JMeterPaletteItem.Kind, java.util.List<JMeterPaletteItem>> grouped = addableItemsByKind(selected);
             for (JMeterPaletteItem.Kind kind : JMeterPaletteItem.Kind.values()) {
-                JMenu category = new JMenu(categoryLabel(kind));
-                for (JMeterPaletteItem item : JMeterPaletteCatalog.items()) {
-                    if (item.kind() == kind && JMeterTreeOperations.canAdd(selected, item)) {
-                        category.add(menuItem(item.toString(), () -> actions.addPaletteItem(item)));
-                    }
-                }
-                if (category.getItemCount() > 0) {
-                    addMenu.add(category);
+                java.util.List<JMeterPaletteItem> items = grouped.get(kind);
+                if (items != null && !items.isEmpty()) {
+                    addMenu.add(new LazyAddCategoryMenu(categoryLabel(kind), items, actions));
                 }
             }
             return addMenu;
+        }
+
+        private Map<JMeterPaletteItem.Kind, java.util.List<JMeterPaletteItem>> addableItemsByKind(JMeterTreeNode selected) {
+            Map<JMeterPaletteItem.Kind, java.util.List<JMeterPaletteItem>> grouped =
+                    new EnumMap<>(JMeterPaletteItem.Kind.class);
+            for (JMeterPaletteItem item : JMeterPaletteCatalog.items()) {
+                if (JMeterTreeOperations.canAdd(selected, item)) {
+                    grouped.computeIfAbsent(item.kind(), ignored -> new ArrayList<>()).add(item);
+                }
+            }
+            return grouped;
         }
 
         private JMenuItem menuItem(String label, Runnable action) {
@@ -178,6 +188,37 @@ final class JMeterTreeView {
                     return "Non-Test Elements";
                 default:
                     return kind.name();
+            }
+        }
+    }
+
+    private static final class LazyAddCategoryMenu extends JMenu {
+        private final java.util.List<JMeterPaletteItem> items;
+        private final JMeterTreeActions actions;
+        private boolean populated;
+
+        private LazyAddCategoryMenu(String label,
+                                    java.util.List<JMeterPaletteItem> items,
+                                    JMeterTreeActions actions) {
+            super(label);
+            this.items = items;
+            this.actions = actions;
+            addMenuListener(new MenuListener() {
+                @Override public void menuSelected(MenuEvent event) { populate(); }
+                @Override public void menuDeselected(MenuEvent event) { }
+                @Override public void menuCanceled(MenuEvent event) { }
+            });
+        }
+
+        private void populate() {
+            if (populated) {
+                return;
+            }
+            populated = true;
+            for (JMeterPaletteItem item : items) {
+                JMenuItem menuItem = new JMenuItem(item.toString());
+                menuItem.addActionListener(event -> actions.addPaletteItem(item));
+                add(menuItem);
             }
         }
     }
