@@ -25,6 +25,10 @@
         <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterPluginClasspathStore"/>
         <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterRunProfileStore"/>
         <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterTemplateStore"/>
+        <projectConfigurable
+                id="jmeter.viewer"
+                displayName="JMeter"
+                instance="com.github.duync.jmeterviewer.JMeterSettingsConfigurable"/>
         <notificationGroup id="JMeter Viewer" displayType="BALLOON"/>
         <toolWindow
                 id="JMeter"

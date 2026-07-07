@@ -230,10 +230,17 @@ final class JMeterPluginClasspath {
     }
 
     private static boolean isChildJar(File directory, File path) {
-        if (!directory.isDirectory() || !path.getName().endsWith(".jar")) {
+        if (!directory.isDirectory()) {
             return false;
         }
         File parent = normalize(path).getParentFile();
-        return parent != null && parent.equals(directory);
+        File normalizedDirectory = normalize(directory);
+        while (parent != null) {
+            if (parent.equals(normalizedDirectory)) {
+                return true;
+            }
+            parent = parent.getParentFile();
+        }
+        return false;
     }
 }
