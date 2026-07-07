@@ -16,6 +16,7 @@ final class JMeterEditorRunListener implements JMeterRunController.Listener {
     @Override
     public void statusChanged(String status) {
         statusConsumer.accept(status);
+        resultsPanel.runStatusChanged(status);
     }
 
     @Override

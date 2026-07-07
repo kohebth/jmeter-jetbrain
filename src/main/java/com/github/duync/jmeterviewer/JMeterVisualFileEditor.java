@@ -193,6 +193,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         }
         resultsPanel.clear();
         resultsPanel.appendDiagnostic("Starting test");
+        resultsPanel.runStarted();
         resultsWorkspace.show();
         setRunStatus("Starting");
         runController.start(model, runOptions);

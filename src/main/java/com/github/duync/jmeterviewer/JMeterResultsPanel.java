@@ -23,6 +23,7 @@ final class JMeterResultsPanel {
     private final JTree resultTree;
     private final JMeterResultDetailTabs tableDetails;
     private final JMeterResultDetailTabs treeDetails;
+    private final JMeterRunMonitorPanel runMonitor;
     private final JTextArea diagnosticLog;
 
     JMeterResultsPanel() {
@@ -44,8 +45,13 @@ final class JMeterResultsPanel {
 
         tableDetails = new JMeterResultDetailTabs();
         treeDetails = new JMeterResultDetailTabs();
+        runMonitor = new JMeterRunMonitorPanel();
         diagnosticLog = new JTextArea(8, 80);
         diagnosticLog.setEditable(false);
+    }
+
+    JComponent monitorComponent() {
+        return runMonitor.component();
     }
 
     JComponent tableComponent() {
@@ -67,6 +73,7 @@ final class JMeterResultsPanel {
     void clear() {
         clearResults();
         clearLog();
+        runMonitor.reset();
     }
 
     void clearResults() {
@@ -85,11 +92,20 @@ final class JMeterResultsPanel {
     void appendSample(SampleResult result) {
         sampleResultModel.add(result);
         aggregateStatsModel.add(result);
+        runMonitor.sample(result);
         int lastRow = sampleResultModel.getRowCount() - 1;
         int viewRow = sampleResultTable.convertRowIndexToView(lastRow);
         sampleResultTable.getSelectionModel().setSelectionInterval(viewRow, viewRow);
         sampleResultTable.scrollRectToVisible(sampleResultTable.getCellRect(viewRow, 0, true));
         appendTreeNode(result);
+    }
+
+    void runStarted() {
+        runMonitor.start();
+    }
+
+    void runStatusChanged(String status) {
+        runMonitor.status(status);
     }
 
     void appendDiagnostic(String message) {
