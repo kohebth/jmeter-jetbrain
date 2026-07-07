@@ -1,7 +1,6 @@
 package com.github.duync.jmeterviewer;
 
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.NotNull;
 
@@ -22,10 +21,6 @@ abstract class JMeterEditorAction extends AnAction {
     protected abstract void perform(JMeterVisualFileEditor editor);
 
     private JMeterVisualFileEditor selectedEditor(Project project) {
-        if (project == null) {
-            return null;
-        }
-        FileEditor selected = FileEditorManager.getInstance(project).getSelectedEditor();
-        return selected instanceof JMeterVisualFileEditor ? (JMeterVisualFileEditor) selected : null;
+        return JMeterOpenEditors.selected(project);
     }
 }

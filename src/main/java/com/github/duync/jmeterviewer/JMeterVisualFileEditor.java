@@ -64,7 +64,6 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         this.project = project;
         this.file = file;
         this.component = new JBPanel<>(new BorderLayout());
-        JMeterPluginClasspathStore.get(project).applyToClasspath();
         this.elementPanel = new JMeterElementPanel(this::markGuiModified);
         this.errorPane = new JEditorPane("text/plain", "");
         this.propertyChangeSupport = new PropertyChangeSupport(this);
@@ -121,6 +120,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     private void load() {
         try {
             EmbeddedJMeterRuntime.ensureReady();
+            JMeterPluginClasspathStore.get(project).applyToClasspath();
             model = JMeterTreeLoader.load(new File(file.getPath()));
             undoSupport.reset(model);
             installModel();
@@ -184,7 +184,16 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     }
 
     void save() {
-        if (JMeterFileSaver.save(project, file, model, elementPanel)) {
+        save(true);
+    }
+
+    void saveSilently() {
+        save(false);
+    }
+
+    private void save(boolean notifySuccess) {
+        updateCurrentJMeterNode();
+        if (JMeterFileSaver.save(project, file, model, elementPanel, notifySuccess)) {
             setModified(false);
         }
     }

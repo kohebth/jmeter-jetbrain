@@ -17,6 +17,7 @@
                 fieldName="INSTANCE"
                 extensions="jmx"/>
         <fileEditorProvider implementation="com.github.duync.jmeterviewer.JMeterFileEditorProvider"/>
+        <postStartupActivity implementation="com.github.duync.jmeterviewer.JMeterStartupActivity"/>
         <psiStructureViewFactory
                 language="JMeter"
                 implementationClass="com.github.duync.jmeterviewer.JMeterStructureViewFactory"/>

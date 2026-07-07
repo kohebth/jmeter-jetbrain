@@ -114,12 +114,16 @@ final class JMeterPluginClasspath {
     }
 
     private static void updateJMeterSearchPaths() {
+        Properties properties = JMeterUtils.getJMeterProperties();
+        if (properties == null) {
+            return;
+        }
         LinkedHashSet<String> values = new LinkedHashSet<>();
         values.addAll(Arrays.asList(JMeterUtils.getSearchPaths()));
         values.addAll(Arrays.asList(searchPaths()));
         values.removeIf(String::isBlank);
         if (!values.isEmpty()) {
-            JMeterUtils.setProperty("search_paths", String.join(File.pathSeparator, values));
+            properties.setProperty("search_paths", String.join(File.pathSeparator, values));
         }
     }
 
