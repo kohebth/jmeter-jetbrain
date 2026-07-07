@@ -1,0 +1,37 @@
+<idea-plugin>
+    <id>com.github.duync.jmeterviewer</id>
+    <name>JMeter Viewer</name>
+    <vendor email="duync@example.com">duync</vendor>
+
+    <description><![CDATA[
+        Opens Apache JMeter .jmx test plans as a visual tree inside JetBrains IDEs.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType
+                name="JMeter Test Plan"
+                implementationClass="com.github.duync.jmeterviewer.JMeterFileType"
+                fieldName="INSTANCE"
+                extensions="jmx"/>
+        <fileEditorProvider implementation="com.github.duync.jmeterviewer.JMeterFileEditorProvider"/>
+        <psiStructureViewFactory
+                language="JMeter"
+                implementationClass="com.github.duync.jmeterviewer.JMeterStructureViewFactory"/>
+        <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterResultsWorkspace"/>
+        <toolWindow
+                id="JMeter Results"
+                anchor="right"
+                factoryClass="com.github.duync.jmeterviewer.JMeterResultsToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="com.github.duync.jmeterviewer.SaveJMeterEditorsAction"
+                class="com.github.duync.jmeterviewer.SaveJMeterEditorsAction"
+                text="Save JMeter Test Plan"
+                description="Save the active JMeter visual editor">
+            <add-to-group group-id="FileMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
