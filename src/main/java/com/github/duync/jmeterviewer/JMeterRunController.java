@@ -1,6 +1,7 @@
 package com.github.duync.jmeterviewer;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.Application;
 import org.apache.jmeter.engine.*;
 import org.apache.jmeter.gui.GuiPackage;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
@@ -161,7 +162,7 @@ final class JMeterRunController {
     }
 
     private void monitorEngines(JMeterRunLifecycle lifecycle, java.util.List<JMeterEngine> monitoredEngines) {
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        Runnable monitor = () -> {
             long started = System.currentTimeMillis();
             boolean sawActive = false;
             while (running.get() && lifecycle == this.lifecycle) {
@@ -179,7 +180,15 @@ final class JMeterRunController {
                 }
                 sleep();
             }
-        });
+        };
+        Application application = ApplicationManager.getApplication();
+        if (application != null) {
+            application.executeOnPooledThread(monitor);
+            return;
+        }
+        Thread thread = new Thread(monitor, "JMeter run monitor");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void sleep() {
