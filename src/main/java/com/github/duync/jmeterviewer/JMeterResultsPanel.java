@@ -2,6 +2,7 @@ package com.github.duync.jmeterviewer;
 
 import com.intellij.ui.JBSplitter;
 import com.intellij.ui.components.JBScrollPane;
+import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.samplers.SampleResult;
 import org.apache.jmeter.testelement.TestElement;
 
@@ -24,9 +25,7 @@ final class JMeterResultsPanel {
     private final JTree resultTree;
     private final JMeterResultDetailTabs tableDetails;
     private final JMeterResultDetailTabs treeDetails;
-    private final JMeterNativeViewResultsTreePanel nativeViewResultsTree;
-    private final JMeterNativeVisualizerPanel nativeTable;
-    private final JMeterNativeVisualizerPanel nativeSummary;
+    private final JMeterNativeResultViews nativeResultViews;
     private final JMeterRunMonitorPanel runMonitor;
     private final JTextArea diagnosticLog;
 
@@ -49,11 +48,7 @@ final class JMeterResultsPanel {
 
         tableDetails = new JMeterResultDetailTabs();
         treeDetails = new JMeterResultDetailTabs();
-        nativeViewResultsTree = new JMeterNativeViewResultsTreePanel();
-        nativeTable = new JMeterNativeVisualizerPanel("View Results in Table",
-                "org.apache.jmeter.visualizers.TableVisualizer");
-        nativeSummary = new JMeterNativeVisualizerPanel("Summary Report",
-                "org.apache.jmeter.visualizers.SummaryReport");
+        nativeResultViews = new JMeterNativeResultViews();
         runMonitor = new JMeterRunMonitorPanel();
         diagnosticLog = new JTextArea(8, 80);
         diagnosticLog.setEditable(false);
@@ -68,11 +63,11 @@ final class JMeterResultsPanel {
     }
 
     JComponent nativeTableComponent() {
-        return nativeTable.component();
+        return nativeComponent(JMeterNativeResultView.VIEW_RESULTS_TABLE);
     }
 
     JComponent treeComponent() {
-        return nativeViewResultsTree.component();
+        return nativeComponent(JMeterNativeResultView.VIEW_RESULTS_TREE);
     }
 
     JComponent summaryComponent() {
@@ -80,23 +75,27 @@ final class JMeterResultsPanel {
     }
 
     JComponent nativeSummaryComponent() {
-        return nativeSummary.component();
+        return nativeComponent(JMeterNativeResultView.SUMMARY_REPORT);
     }
 
     JComponent logComponent() {
         return new JBScrollPane(diagnosticLog);
     }
 
-    void configureViewResultsTree(TestElement element) {
-        nativeViewResultsTree.configure(element);
+    JComponent nativeComponent(JMeterNativeResultView view) {
+        return nativeResultViews.component(view);
     }
 
-    void configureNativeTable(TestElement element) {
-        nativeTable.configure(element);
+    void configureNativeResultViews(JMeterTreeModel model) {
+        nativeResultViews.configureFromModel(model);
     }
 
-    void configureNativeSummary(TestElement element) {
-        nativeSummary.configure(element);
+    void configureNativeResultView(JMeterNativeResultView view, TestElement element) {
+        nativeResultViews.configure(view, element);
+    }
+
+    JMeterNativeResultView nativeViewFor(TestElement element) {
+        return nativeResultViews.matchingView(element);
     }
 
     void clear() {
@@ -112,9 +111,7 @@ final class JMeterResultsPanel {
         resultTreeModel.reload();
         tableDetails.clear();
         treeDetails.clear();
-        nativeViewResultsTree.clear();
-        nativeTable.clear();
-        nativeSummary.clear();
+        nativeResultViews.clear();
     }
 
     void clearLog() {
@@ -129,9 +126,7 @@ final class JMeterResultsPanel {
         int viewRow = sampleResultTable.convertRowIndexToView(lastRow);
         sampleResultTable.getSelectionModel().setSelectionInterval(viewRow, viewRow);
         sampleResultTable.scrollRectToVisible(sampleResultTable.getCellRect(viewRow, 0, true));
-        nativeViewResultsTree.add(result);
-        nativeTable.add(result);
-        nativeSummary.add(result);
+        nativeResultViews.add(result);
         appendTreeNode(result);
     }
 
