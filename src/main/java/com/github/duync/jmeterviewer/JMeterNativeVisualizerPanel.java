@@ -9,19 +9,68 @@ import org.apache.jmeter.visualizers.Visualizer;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.HierarchyEvent;
 
 final class JMeterNativeVisualizerPanel {
     private final JPanel panel = new JPanel(new BorderLayout());
-    private final Visualizer visualizer;
-    private final Clearable clearable;
-    private final JMeterGUIComponent guiComponent;
-    private final JTextArea fallback;
+    private final String label;
+    private final String className;
+    private Visualizer visualizer;
+    private Clearable clearable;
+    private JMeterGUIComponent guiComponent;
+    private JTextArea fallback;
+    private boolean loaded;
 
     JMeterNativeVisualizerPanel(String label, String className) {
+        this.label = label;
+        this.className = className;
+        panel.add(new JLabel("Open this tab to load " + label), BorderLayout.NORTH);
+        panel.addHierarchyListener(event -> {
+            if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && panel.isShowing()) {
+                load();
+            }
+        });
+    }
+
+    JComponent component() {
+        return panel;
+    }
+
+    void clear() {
+        if (clearable != null) {
+            clearable.clearData();
+        }
+        if (fallback != null) {
+            fallback.setCaretPosition(0);
+        }
+    }
+
+    void configure(TestElement element) {
+        if (element == null) {
+            return;
+        }
+        load();
+        if (guiComponent != null) {
+            guiComponent.configure(element);
+        }
+    }
+
+    void add(SampleResult result) {
+        if (visualizer != null && result != null) {
+            visualizer.add(result);
+        }
+    }
+
+    private void load() {
+        if (loaded) {
+            return;
+        }
+        loaded = true;
         Visualizer createdVisualizer = null;
         Clearable createdClearable = null;
         JMeterGUIComponent createdGui = null;
         JTextArea error = null;
+        panel.removeAll();
         try {
             EmbeddedJMeterRuntime.ensureReady();
             Object instance = JMeterPluginClasspath.loadClass(className).getDeclaredConstructor().newInstance();
@@ -47,30 +96,7 @@ final class JMeterNativeVisualizerPanel {
         clearable = createdClearable;
         guiComponent = createdGui;
         fallback = error;
-    }
-
-    JComponent component() {
-        return panel;
-    }
-
-    void clear() {
-        if (clearable != null) {
-            clearable.clearData();
-        }
-        if (fallback != null) {
-            fallback.setCaretPosition(0);
-        }
-    }
-
-    void configure(TestElement element) {
-        if (guiComponent != null && element != null) {
-            guiComponent.configure(element);
-        }
-    }
-
-    void add(SampleResult result) {
-        if (visualizer != null && result != null) {
-            visualizer.add(result);
-        }
+        panel.revalidate();
+        panel.repaint();
     }
 }
