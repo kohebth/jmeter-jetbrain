@@ -65,12 +65,20 @@ final class JMeterResultsPanel {
     }
 
     void clear() {
+        clearResults();
+        clearLog();
+    }
+
+    void clearResults() {
         sampleResultModel.clear();
         aggregateStatsModel.clear();
         resultRoot.removeAllChildren();
         resultTreeModel.reload();
         tableDetails.clear();
         treeDetails.clear();
+    }
+
+    void clearLog() {
         diagnosticLog.setText("");
     }
 
@@ -90,18 +98,29 @@ final class JMeterResultsPanel {
     }
 
     void exportSamples(File file) {
-        try (Writer writer = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8)) {
-            writer.write("label,success,thread,time,latency,connect,responseCode,responseMessage,url,bytes\n");
-            for (int i = 0; i < sampleResultModel.getRowCount(); i++) {
-                SampleResult result = sampleResultModel.get(i);
-                if (result != null) {
-                    writer.write(csv(result));
-                    writer.write("\n");
-                }
-            }
+        try {
+            JMeterSampleResultExporter.csv(sampleResultModel, file);
             appendDiagnostic("Exported samples to " + file.getPath());
         } catch (IOException exception) {
             appendDiagnostic("Unable to export samples: " + exception.getMessage());
+        }
+    }
+
+    void exportJtlXml(File file) {
+        try {
+            JMeterSampleResultExporter.jtlXml(sampleResultModel, file);
+            appendDiagnostic("Exported JTL XML to " + file.getPath());
+        } catch (IOException exception) {
+            appendDiagnostic("Unable to export JTL XML: " + exception.getMessage());
+        }
+    }
+
+    void exportJtlCsv(File file) {
+        try {
+            JMeterSampleResultExporter.jtlCsv(sampleResultModel, file);
+            appendDiagnostic("Exported JTL CSV to " + file.getPath());
+        } catch (IOException exception) {
+            appendDiagnostic("Unable to export JTL CSV: " + exception.getMessage());
         }
     }
 
@@ -214,10 +233,6 @@ final class JMeterResultsPanel {
         for (int i = 0; i < node.getChildCount(); i++) {
             collectFailures((DefaultMutableTreeNode) node.getChildAt(i), failures);
         }
-    }
-
-    private String csv(SampleResult result) {
-        return JMeterResultDetails.csv(result);
     }
 
     private JComponent withDetails(JComponent results, JComponent details) {

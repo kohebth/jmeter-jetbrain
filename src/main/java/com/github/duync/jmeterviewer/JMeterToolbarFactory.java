@@ -30,6 +30,8 @@ final class JMeterToolbarFactory {
                 state.exitEnginesButton,
                 state.resultFileLoader.button(),
                 state.exportActions.samplesButton(),
+                state.exportActions.jtlXmlButton(),
+                state.exportActions.jtlCsvButton(),
                 state.exportActions.logButton(),
                 state.reportAction.button(),
                 state.validationAction.button(),

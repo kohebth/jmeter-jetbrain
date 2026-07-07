@@ -1,31 +1,42 @@
 package com.github.duync.jmeterviewer;
 
+import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.ui.components.JBScrollPane;
 import org.apache.jmeter.assertions.AssertionResult;
 import org.apache.jmeter.samplers.SampleResult;
 
 import javax.swing.*;
+import java.awt.*;
+import java.awt.datatransfer.StringSelection;
 
 final class JMeterResultDetailTabs {
     private final JTabbedPane tabs = new JTabbedPane();
+    private final JPanel panel = new JPanel(new BorderLayout());
     private final JTextArea sampler = area();
     private final JTextArea request = area();
     private final JTextArea response = area();
+    private final JTextArea rendered = area();
     private final JTextArea assertions = area();
+    private String requestText = "";
+    private String responseText = "";
+    private String renderedText = "";
 
     JMeterResultDetailTabs() {
+        panel.add(toolbar(), BorderLayout.NORTH);
         tabs.addTab("Sampler Result", new JBScrollPane(sampler));
         tabs.addTab("Request", new JBScrollPane(request));
         tabs.addTab("Response Data", new JBScrollPane(response));
+        tabs.addTab("Rendered", new JBScrollPane(rendered));
         tabs.addTab("Assertions", new JBScrollPane(assertions));
+        panel.add(tabs, BorderLayout.CENTER);
     }
 
     JComponent component() {
-        return tabs;
+        return panel;
     }
 
     void clear() {
-        set("", "", "", "");
+        set("", "", "", "", "");
     }
 
     void showSample(SampleResult result) {
@@ -33,23 +44,28 @@ final class JMeterResultDetailTabs {
                 sampler(result),
                 request(result),
                 response(result),
+                JMeterResponseRenderer.render(result),
                 assertions(result.getAssertionResults())
         );
     }
 
     void showAssertion(AssertionResult result) {
-        set(JMeterResultDetails.assertion(result), "", "", JMeterResultDetails.assertion(result));
-        tabs.setSelectedIndex(3);
+        set(JMeterResultDetails.assertion(result), "", "", "", JMeterResultDetails.assertion(result));
+        tabs.setSelectedIndex(4);
     }
 
     void showText(String text) {
-        set(text, "", "", "");
+        set(text, "", "", "", "");
     }
 
-    private void set(String samplerText, String requestText, String responseText, String assertionText) {
+    private void set(String samplerText, String requestText, String responseText, String renderedText, String assertionText) {
+        this.requestText = requestText;
+        this.responseText = responseText;
+        this.renderedText = renderedText;
         setText(sampler, samplerText);
         setText(request, requestText);
         setText(response, responseText);
+        setText(rendered, renderedText);
         setText(assertions, assertionText);
     }
 
@@ -100,6 +116,24 @@ final class JMeterResultDetailTabs {
         JTextArea area = new JTextArea(8, 80);
         area.setEditable(false);
         return area;
+    }
+
+    private JComponent toolbar() {
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        toolbar.add(button("Copy Request", () -> copy(requestText)));
+        toolbar.add(button("Copy Response", () -> copy(responseText)));
+        toolbar.add(button("Copy Rendered", () -> copy(renderedText)));
+        return toolbar;
+    }
+
+    private JButton button(String label, Runnable action) {
+        JButton button = new JButton(label);
+        button.addActionListener(event -> action.run());
+        return button;
+    }
+
+    private void copy(String text) {
+        CopyPasteManager.getInstance().setContents(new StringSelection(text == null ? "" : text));
     }
 
     private void setText(JTextArea area, String text) {

@@ -1,6 +1,7 @@
 package com.github.duync.jmeterviewer;
 
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.components.JBPanel;
 import org.apache.jmeter.util.JMeterUtils;
 
@@ -13,8 +14,12 @@ final class JMeterRunOptions {
     private final JTextField resultFile;
     private final JComboBox<String> logLevel;
     private final JMeterAdvancedRunOptions advancedOptions;
+    private final JMeterRunProfileStore profileStore;
+    private final Project project;
 
     JMeterRunOptions(Project project) {
+        this.project = project;
+        profileStore = JMeterRunProfileStore.get(project);
         panel = new JBPanel<>(new FlowLayout(FlowLayout.LEFT, 4, 0));
         remoteHosts = new JTextField(12);
         resultFile = new JTextField(14);
@@ -28,6 +33,8 @@ final class JMeterRunOptions {
         panel.add(new JLabel("Log"));
         panel.add(logLevel);
         panel.add(advancedOptions.button());
+        panel.add(saveProfileButton());
+        panel.add(loadProfileButton());
     }
 
     JComponent component() {
@@ -57,6 +64,44 @@ final class JMeterRunOptions {
             }
         }
         return hosts;
+    }
+
+    JMeterRunProfile snapshot() {
+        return new JMeterRunProfile(
+                remoteHosts.getText(),
+                resultFile.getText(),
+                selectedLogLevel(),
+                advancedOptions.snapshot()
+        );
+    }
+
+    void restore(JMeterRunProfile profile) {
+        JMeterRunProfile safeProfile = profile == null ? JMeterRunProfile.empty() : profile;
+        remoteHosts.setText(safeProfile.remoteHosts());
+        resultFile.setText(safeProfile.resultFile());
+        logLevel.setSelectedItem(safeProfile.logLevel());
+        advancedOptions.restore(safeProfile.advanced());
+    }
+
+    private JButton saveProfileButton() {
+        JButton button = new JButton("Save Profile");
+        button.addActionListener(event -> {
+            profileStore.save(snapshot());
+            Messages.showInfoMessage(project, "JMeter run profile saved for this project.", "JMeter");
+        });
+        return button;
+    }
+
+    private JButton loadProfileButton() {
+        JButton button = new JButton("Load Profile");
+        button.addActionListener(event -> {
+            if (!profileStore.hasProfile()) {
+                Messages.showInfoMessage(project, "No JMeter run profile has been saved for this project.", "JMeter");
+                return;
+            }
+            restore(profileStore.load());
+        });
+        return button;
     }
 
     private String selectedLogLevel() {

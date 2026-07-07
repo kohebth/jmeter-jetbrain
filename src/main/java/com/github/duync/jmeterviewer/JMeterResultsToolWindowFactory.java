@@ -29,8 +29,16 @@ public final class JMeterResultsToolWindowFactory implements ToolWindowFactory {
         toolbar.setFloatable(false);
         toolbar.add(new JMeterResultFileLoader(project, panel).button());
         toolbar.add(new JMeterReportAction(project, panel).button());
+        toolbar.add(button("Clear Samples", panel::clearResults));
+        toolbar.add(button("Clear Log", panel::clearLog));
         wrapper.add(toolbar, BorderLayout.NORTH);
         wrapper.add(component, BorderLayout.CENTER);
         return wrapper;
+    }
+
+    private JButton button(String label, Runnable action) {
+        JButton button = new JButton(label);
+        button.addActionListener(event -> action.run());
+        return button;
     }
 }

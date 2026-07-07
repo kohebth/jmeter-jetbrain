@@ -21,6 +21,8 @@ final class JMeterEditorToolbar {
                              JButton exitEnginesButton,
                              JButton loadJtlButton,
                              JButton exportSamplesButton,
+                             JButton exportJtlXmlButton,
+                             JButton exportJtlCsvButton,
                              JButton exportLogButton,
                              JButton htmlReportButton,
                              JButton validateButton,
@@ -47,8 +49,12 @@ final class JMeterEditorToolbar {
         toolbar.add(runOptions.component());
         toolbar.add(threadControl.component());
         toolbar.add(button("Clear Results", resultsPanel::clear));
+        toolbar.add(button("Clear Samples", resultsPanel::clearResults));
+        toolbar.add(button("Clear Log", resultsPanel::clearLog));
         toolbar.add(loadJtlButton);
         toolbar.add(exportSamplesButton);
+        toolbar.add(exportJtlXmlButton);
+        toolbar.add(exportJtlCsvButton);
         toolbar.add(exportLogButton);
         toolbar.add(htmlReportButton);
         toolbar.add(button("Next Fail", resultsPanel::selectNextFailure));

@@ -38,6 +38,21 @@ final class JMeterAdvancedRunOptions {
         applySystemProperties(JMeterKeyValueOptions.parse(systemProperties.getText()));
     }
 
+    JMeterRunProfile.Advanced snapshot() {
+        return new JMeterRunProfile.Advanced(
+                userPropertiesFile.getText(),
+                jmeterProperties.getText(),
+                systemProperties.getText()
+        );
+    }
+
+    void restore(JMeterRunProfile.Advanced profile) {
+        JMeterRunProfile.Advanced safeProfile = profile == null ? JMeterRunProfile.Advanced.empty() : profile;
+        userPropertiesFile.setText(safeProfile.userPropertiesFile());
+        jmeterProperties.setText(safeProfile.jmeterProperties());
+        systemProperties.setText(safeProfile.systemProperties());
+    }
+
     private void showDialog() {
         DialogBuilder builder = new DialogBuilder(project);
         builder.setTitle("JMeter Run Options");
