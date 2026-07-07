@@ -1,5 +1,6 @@
 package com.github.duync.jmeterviewer;
 
+import com.intellij.openapi.application.ApplicationManager;
 import org.apache.jmeter.engine.*;
 import org.apache.jmeter.gui.GuiPackage;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
@@ -16,6 +17,7 @@ final class JMeterRunController {
     private final Listener listener;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final java.util.List<JMeterEngine> engines = new ArrayList<>();
+    private volatile JMeterRunLifecycle lifecycle;
 
     JMeterRunController(Listener listener) {
         this.listener = listener;
@@ -53,7 +55,7 @@ final class JMeterRunController {
                 SwingUtilities.invokeLater(() -> listener.log("No JMeter engines configured"));
                 return;
             }
-            RunLifecycle lifecycle = new RunLifecycle(listener, running, engines.size());
+            lifecycle = new JMeterRunLifecycle(listener, running, engines.size());
             EditorResultCollector collector = new EditorResultCollector(listener, lifecycle);
             if (options != null && options.resultFile() != null) {
                 collector.setFilename(options.resultFile());
@@ -66,8 +68,10 @@ final class JMeterRunController {
             for (JMeterEngine engine : engines) {
                 engine.runTest();
             }
+            monitorEngines(lifecycle, new ArrayList<>(engines));
         } catch (Exception exception) {
             running.set(false);
+            lifecycle = null;
             notifyStatus("Run failed: " + exception.getMessage());
             SwingUtilities.invokeLater(() -> listener.log("Run failed: " + exception));
         }
@@ -76,6 +80,10 @@ final class JMeterRunController {
     void stop() {
         if (running.get()) {
             stopAll(true, "Stopping");
+            JMeterRunLifecycle current = lifecycle;
+            if (current != null) {
+                current.forceFinish("Stopped", "Stop requested");
+            }
         }
     }
 
@@ -116,6 +124,7 @@ final class JMeterRunController {
         }
         engines.clear();
         running.set(false);
+        lifecycle = null;
         notifyStatus("Idle");
         SwingUtilities.invokeLater(() -> listener.log("Exited JMeter engines"));
     }
@@ -142,7 +151,41 @@ final class JMeterRunController {
     private void stopAll(boolean now, String status) {
         notifyStatus(status);
         for (JMeterEngine engine : engines) {
-            engine.stopTest(now);
+            try {
+                engine.stopTest(now);
+            } catch (RuntimeException exception) {
+                SwingUtilities.invokeLater(() -> listener.log("Unable to stop engine: " + exception.getMessage()));
+            }
+        }
+    }
+
+    private void monitorEngines(JMeterRunLifecycle lifecycle, java.util.List<JMeterEngine> monitoredEngines) {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            long started = System.currentTimeMillis();
+            boolean sawActive = false;
+            while (running.get() && lifecycle == this.lifecycle) {
+                boolean anyActive = false;
+                for (JMeterEngine engine : monitoredEngines) {
+                    try {
+                        anyActive |= engine.isActive();
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+                sawActive |= anyActive;
+                if (!anyActive && (sawActive || System.currentTimeMillis() - started > 1000L)) {
+                    lifecycle.forceFinish("Finished", "All JMeter engines are idle");
+                    return;
+                }
+                sleep();
+            }
+        });
+    }
+
+    private void sleep() {
+        try {
+            Thread.sleep(250L);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -187,45 +230,11 @@ final class JMeterRunController {
         }
     }
 
-    private static final class RunLifecycle {
-        private final Listener listener;
-        private final AtomicBoolean running;
-        private final java.util.concurrent.atomic.AtomicInteger remaining;
-
-        private RunLifecycle(Listener listener, AtomicBoolean running, int engines) {
-            this.listener = listener;
-            this.running = running;
-            this.remaining = new java.util.concurrent.atomic.AtomicInteger(engines);
-        }
-
-        private void started(String host) {
-            SwingUtilities.invokeLater(() -> {
-                listener.statusChanged("Running");
-                listener.log("Test started" + suffix(host));
-            });
-        }
-
-        private void ended(String host) {
-            int left = remaining.updateAndGet(value -> Math.max(0, value - 1));
-            if (left == 0) {
-                running.set(false);
-            }
-            SwingUtilities.invokeLater(() -> {
-                listener.log("Test finished" + suffix(host));
-                listener.statusChanged(left == 0 ? "Finished" : "Running (" + left + " engines)");
-            });
-        }
-
-        private String suffix(String host) {
-            return host == null || host.trim().isEmpty() ? "" : " on " + host;
-        }
-    }
-
     private static final class EditorResultCollector extends ResultCollector {
         private final Listener listener;
-        private final RunLifecycle lifecycle;
+        private final JMeterRunLifecycle lifecycle;
 
-        private EditorResultCollector(Listener listener, RunLifecycle lifecycle) {
+        private EditorResultCollector(Listener listener, JMeterRunLifecycle lifecycle) {
             this.listener = listener;
             this.lifecycle = lifecycle;
         }
