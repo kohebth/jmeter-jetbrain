@@ -7,10 +7,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.JarURLConnection;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -23,10 +25,19 @@ final class EmbeddedJMeterRuntime {
     }
 
     static void ensureReady() throws IOException {
-        if (!READY.compareAndSet(false, true)) {
+        if (READY.get()) {
             return;
         }
+        synchronized (EmbeddedJMeterRuntime.class) {
+            if (READY.get()) {
+                return;
+            }
+            initialize();
+            READY.set(true);
+        }
+    }
 
+    private static void initialize() throws IOException {
         Path home = Files.createTempDirectory("jetbrains-jmeter-home");
         Path bin = Files.createDirectories(home.resolve("bin"));
         copyResource("/bin/saveservice.properties", bin.resolve("saveservice.properties"));
@@ -63,7 +74,7 @@ final class EmbeddedJMeterRuntime {
             URL root = roots.nextElement();
             try {
                 if ("jar".equals(root.getProtocol())) {
-                    copyJarTree((JarURLConnection) root.openConnection(), resource, target);
+                    copyJarTree(root, resource, target);
                 } else if ("file".equals(root.getProtocol())) {
                     copyFileTree(Paths.get(root.toURI()), target);
                 }
@@ -79,8 +90,8 @@ final class EmbeddedJMeterRuntime {
         }
     }
 
-    private static void copyJarTree(JarURLConnection connection, String resource, Path target) throws IOException {
-        try (JarFile jarFile = connection.getJarFile()) {
+    private static void copyJarTree(URL root, String resource, Path target) throws IOException {
+        try (JarFile jarFile = openJar(root)) {
             Enumeration<JarEntry> entries = jarFile.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
@@ -94,6 +105,28 @@ final class EmbeddedJMeterRuntime {
                 }
             }
         }
+    }
+
+    private static JarFile openJar(URL root) throws IOException {
+        try {
+            if (root.openConnection() instanceof JarURLConnection) {
+                return ((JarURLConnection) root.openConnection()).getJarFile();
+            }
+        } catch (ClassCastException ignored) {
+        }
+        String spec = root.toExternalForm();
+        int separator = spec.indexOf("!/");
+        if (separator < 0) {
+            throw new IOException("Unsupported bundled resource URL: " + spec);
+        }
+        String jarPath = spec.substring(0, separator);
+        if (jarPath.startsWith("jar:")) {
+            jarPath = jarPath.substring(4);
+        }
+        if (jarPath.startsWith("file:")) {
+            jarPath = jarPath.substring(5);
+        }
+        return new JarFile(URLDecoder.decode(jarPath, StandardCharsets.UTF_8.name()));
     }
 
     private static void copyFileTree(Path source, Path target) throws IOException {
