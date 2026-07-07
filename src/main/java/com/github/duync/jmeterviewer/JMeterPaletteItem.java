@@ -89,6 +89,7 @@ final class JMeterPaletteItem {
             new JMeterPaletteItem("XPath2 Assertion", Kind.ASSERTION, "org.apache.jmeter.assertions.gui.XPath2AssertionGui", "org.apache.jmeter.assertions.XPath2Assertion"),
             new JMeterPaletteItem("MD5Hex Assertion", Kind.ASSERTION, "org.apache.jmeter.assertions.gui.MD5HexAssertionGUI", "org.apache.jmeter.assertions.MD5HexAssertion"),
             new JMeterPaletteItem("SMIME Assertion", Kind.ASSERTION, "org.apache.jmeter.assertions.gui.SMIMEAssertionGui", "org.apache.jmeter.assertions.SMIMEAssertionTestElement"),
+            new JMeterPaletteItem("Compare Assertion", Kind.ASSERTION, "org.apache.jmeter.testbeans.gui.TestBeanGUI", "org.apache.jmeter.assertions.CompareAssertion"),
             new JMeterPaletteItem("JSR223 Assertion", Kind.ASSERTION, "org.apache.jmeter.testbeans.gui.TestBeanGUI", "org.apache.jmeter.assertions.JSR223Assertion"),
             new JMeterPaletteItem("BeanShell Assertion", Kind.ASSERTION, "org.apache.jmeter.assertions.gui.BeanShellAssertionGui", "org.apache.jmeter.assertions.BeanShellAssertion"),
             new JMeterPaletteItem("BSF Assertion", Kind.ASSERTION, "org.apache.jmeter.testbeans.gui.TestBeanGUI", "org.apache.jmeter.assertions.BSFAssertion"),
@@ -137,12 +138,14 @@ final class JMeterPaletteItem {
             new JMeterPaletteItem("Comparison Assertion Visualizer", Kind.LISTENER, "org.apache.jmeter.visualizers.ComparisonVisualizer", "org.apache.jmeter.reporters.ResultCollector"),
             new JMeterPaletteItem("Simple Data Writer", Kind.LISTENER, "org.apache.jmeter.visualizers.SimpleDataWriter", "org.apache.jmeter.reporters.ResultCollector"),
             new JMeterPaletteItem("Save Responses to a file", Kind.LISTENER, "org.apache.jmeter.reporters.gui.ResultSaverGui", "org.apache.jmeter.reporters.ResultSaver"),
+            new JMeterPaletteItem("Mailer Visualizer", Kind.LISTENER, "org.apache.jmeter.visualizers.MailerVisualizer", "org.apache.jmeter.reporters.ResultCollector"),
             new JMeterPaletteItem("BeanShell Listener", Kind.LISTENER, "org.apache.jmeter.testbeans.gui.TestBeanGUI", "org.apache.jmeter.visualizers.BeanShellListener"),
             new JMeterPaletteItem("BSF Listener", Kind.LISTENER, "org.apache.jmeter.testbeans.gui.TestBeanGUI", "org.apache.jmeter.visualizers.BSFListener"),
             new JMeterPaletteItem("JSR223 Listener", Kind.LISTENER, "org.apache.jmeter.testbeans.gui.TestBeanGUI", "org.apache.jmeter.visualizers.JSR223Listener"),
             new JMeterPaletteItem("Backend Listener", Kind.LISTENER, "org.apache.jmeter.visualizers.backend.BackendListenerGui", "org.apache.jmeter.visualizers.backend.BackendListener"),
 
             new JMeterPaletteItem("WorkBench", Kind.NON_TEST, "org.apache.jmeter.control.gui.WorkBenchGui", "org.apache.jmeter.testelement.WorkBench"),
+            new JMeterPaletteItem("Property Display", Kind.NON_TEST, "org.apache.jmeter.visualizers.PropertyControlGui", null),
             new JMeterPaletteItem("HTTP(S) Test Script Recorder", Kind.NON_TEST, "org.apache.jmeter.protocol.http.proxy.gui.ProxyControlGui", "org.apache.jmeter.protocol.http.proxy.ProxyControl")
     );
 

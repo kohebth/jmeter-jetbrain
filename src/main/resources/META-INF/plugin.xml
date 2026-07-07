@@ -33,5 +33,41 @@
                 description="Save the active JMeter visual editor">
             <add-to-group group-id="FileMenu" anchor="last"/>
         </action>
+        <action id="com.github.duync.jmeterviewer.JMeterRunAction"
+                class="com.github.duync.jmeterviewer.JMeterRunAction"
+                text="Run JMeter Test"
+                description="Run the active JMeter test plan">
+            <add-to-group group-id="RunMenu" anchor="last"/>
+        </action>
+        <action id="com.github.duync.jmeterviewer.JMeterStopAction"
+                class="com.github.duync.jmeterviewer.JMeterStopAction"
+                text="Stop JMeter Test"
+                description="Stop the active JMeter test">
+            <add-to-group group-id="RunMenu" anchor="last"/>
+        </action>
+        <action id="com.github.duync.jmeterviewer.JMeterReloadAction"
+                class="com.github.duync.jmeterviewer.JMeterReloadAction"
+                text="Reload JMeter Test Plan"
+                description="Reload the active JMeter test plan from disk">
+            <add-to-group group-id="FileMenu" anchor="last"/>
+        </action>
+        <action id="com.github.duync.jmeterviewer.JMeterValidateEditorAction"
+                class="com.github.duync.jmeterviewer.JMeterValidateEditorAction"
+                text="Validate JMeter Test Plan"
+                description="Validate the active JMeter test plan">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+        <action id="com.github.duync.jmeterviewer.JMeterCommandsAction"
+                class="com.github.duync.jmeterviewer.JMeterCommandsAction"
+                text="JMeter Commands"
+                description="Open the JMeter command palette">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+        <action id="com.github.duync.jmeterviewer.JMeterTemplatesAction"
+                class="com.github.duync.jmeterviewer.JMeterTemplatesAction"
+                text="JMeter Templates"
+                description="Open JMeter templates">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

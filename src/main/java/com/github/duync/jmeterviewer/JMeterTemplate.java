@@ -118,6 +118,16 @@ final class JMeterTemplate {
                                 node("Bolt Request"),
                                 node("MongoDB Script"),
                                 node("Aggregate Report"))
+                ),
+                new JMeterTemplate(
+                        "Diagnostics Plan",
+                        "Debug sampler, compare assertion, mailer visualizer and property display.",
+                        node("Thread Group",
+                                node("Debug Sampler",
+                                        node("Compare Assertion")),
+                                node("Mailer Visualizer"),
+                                node("View Results Tree")),
+                        node("Property Display")
                 )
         );
     }

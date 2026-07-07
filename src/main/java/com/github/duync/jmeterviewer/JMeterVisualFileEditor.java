@@ -101,7 +101,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
                 resetEnginesButton,
                 exitEnginesButton,
                 this::save,
-                this::reload,
+                this::reloadFromFile,
                 this::runTest,
                 runController,
                 validationAction,
@@ -111,7 +111,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         load();
     }
 
-    private void reload() {
+    void reloadFromFile() {
         if (JMeterReloadGuard.canDiscard(project, modified)) {
             load();
         }
@@ -157,11 +157,9 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         component.add(JMeterEditorBody.create(project, tree, elementPanel.component(), sourcePanel), BorderLayout.CENTER);
     }
 
-    private void showCommands() {
-        if (commandPalette != null) {
-            commandPalette.show();
-        }
-    }
+    void showCommands() { if (commandPalette != null) commandPalette.show(); }
+
+    void showTemplates() { if (templateDialog != null) templateDialog.show(); }
 
     private void restoreModel(JMeterTreeModel restoredModel) {
         model = restoredModel;
@@ -188,7 +186,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         }
     }
 
-    private void runTest() {
+    void runTest() {
         if (model == null || runController.isRunning()) {
             return;
         }
@@ -198,6 +196,10 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         setRunStatus("Starting");
         runController.start(model, runOptions);
     }
+
+    void stopTest() { runController.stop(); }
+
+    void validatePlan() { validationAction.validateNow(); }
 
     private void setRunStatus(String status) {
         runStatusLabel.setText(status);
@@ -252,15 +254,9 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         component.add(new JBScrollPane(errorPane));
     }
 
-    @Override
-    public @NotNull JComponent getComponent() { return component; }
-
-    @Override
-    public @Nullable JComponent getPreferredFocusedComponent() { return component; }
-
-    @Override
-    public @Nls(capitalization = Nls.Capitalization.Title) @NotNull String getName() { return "JMeter"; }
-
+    @Override public @NotNull JComponent getComponent() { return component; }
+    @Override public @Nullable JComponent getPreferredFocusedComponent() { return component; }
+    @Override public @Nls(capitalization = Nls.Capitalization.Title) @NotNull String getName() { return "JMeter"; }
     @Override public void setState(@NotNull FileEditorState state) { }
     @Override public @NotNull FileEditorState getState(@NotNull FileEditorStateLevel level) { return FileEditorState.INSTANCE; }
     @Override public boolean isModified() { return modified; }
