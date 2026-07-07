@@ -23,6 +23,7 @@ final class JMeterResultsPanel {
     private final JTree resultTree;
     private final JMeterResultDetailTabs tableDetails;
     private final JMeterResultDetailTabs treeDetails;
+    private final JMeterNativeViewResultsTreePanel nativeViewResultsTree;
     private final JMeterRunMonitorPanel runMonitor;
     private final JTextArea diagnosticLog;
 
@@ -45,6 +46,7 @@ final class JMeterResultsPanel {
 
         tableDetails = new JMeterResultDetailTabs();
         treeDetails = new JMeterResultDetailTabs();
+        nativeViewResultsTree = new JMeterNativeViewResultsTreePanel();
         runMonitor = new JMeterRunMonitorPanel();
         diagnosticLog = new JTextArea(8, 80);
         diagnosticLog.setEditable(false);
@@ -59,7 +61,7 @@ final class JMeterResultsPanel {
     }
 
     JComponent treeComponent() {
-        return withDetails(new JBScrollPane(resultTree), treeDetails.component());
+        return nativeViewResultsTree.component();
     }
 
     JComponent summaryComponent() {
@@ -83,6 +85,7 @@ final class JMeterResultsPanel {
         resultTreeModel.reload();
         tableDetails.clear();
         treeDetails.clear();
+        nativeViewResultsTree.clear();
     }
 
     void clearLog() {
@@ -97,6 +100,7 @@ final class JMeterResultsPanel {
         int viewRow = sampleResultTable.convertRowIndexToView(lastRow);
         sampleResultTable.getSelectionModel().setSelectionInterval(viewRow, viewRow);
         sampleResultTable.scrollRectToVisible(sampleResultTable.getCellRect(viewRow, 0, true));
+        nativeViewResultsTree.add(result);
         appendTreeNode(result);
     }
 
