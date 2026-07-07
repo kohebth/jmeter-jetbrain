@@ -27,13 +27,9 @@
         <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterTemplateStore"/>
         <notificationGroup id="JMeter Viewer" displayType="BALLOON"/>
         <toolWindow
-                id="JMeter Results"
-                anchor="right"
-                factoryClass="com.github.duync.jmeterviewer.JMeterResultsToolWindowFactory"/>
-        <toolWindow
-                id="JMeter Tools"
+                id="JMeter"
                 anchor="bottom"
-                factoryClass="com.github.duync.jmeterviewer.JMeterToolsToolWindowFactory"/>
+                factoryClass="com.github.duync.jmeterviewer.JMeterResultsToolWindowFactory"/>
     </extensions>
 
     <actions>

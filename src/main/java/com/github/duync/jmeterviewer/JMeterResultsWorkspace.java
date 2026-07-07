@@ -5,7 +5,7 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 
 public final class JMeterResultsWorkspace {
-    static final String TOOL_WINDOW_ID = "JMeter Results";
+    static final String TOOL_WINDOW_ID = "JMeter";
 
     private final Project project;
     private final JMeterResultsPanel resultsPanel = new JMeterResultsPanel();

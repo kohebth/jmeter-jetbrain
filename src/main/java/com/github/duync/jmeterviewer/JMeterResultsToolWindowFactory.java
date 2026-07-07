@@ -13,6 +13,9 @@ public final class JMeterResultsToolWindowFactory implements ToolWindowFactory {
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
         JMeterResultsPanel panel = JMeterResultsWorkspace.get(project).resultsPanel();
+        toolWindow.getContentManager().addContent(
+                new ContentImpl(JMeterLeftPanel.create(project), "Tools", false)
+        );
         toolWindow.getContentManager().addContent(content(project, panel, "Run", panel.monitorComponent()));
         toolWindow.getContentManager().addContent(content(project, panel, "Table", panel.tableComponent()));
         toolWindow.getContentManager().addContent(content(project, panel, "Tree", panel.treeComponent()));
