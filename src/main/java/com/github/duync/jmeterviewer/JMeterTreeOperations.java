@@ -187,9 +187,13 @@ final class JMeterTreeOperations {
         try {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             SaveService.saveElement(element, output);
-            return (TestElement) SaveService.loadElement(new ByteArrayInputStream(output.toByteArray()));
+            TestElement copy = (TestElement) SaveService.loadElement(new ByteArrayInputStream(output.toByteArray()));
+            JMeterElementMetadata.normalize(copy);
+            return copy;
         } catch (Exception exception) {
-            return (TestElement) element.clone();
+            TestElement copy = (TestElement) element.clone();
+            JMeterElementMetadata.normalize(copy);
+            return copy;
         }
     }
 }

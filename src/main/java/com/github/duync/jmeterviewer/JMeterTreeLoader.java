@@ -81,6 +81,7 @@ final class JMeterTreeLoader {
     }
 
     private static JMeterTreeNode createNode(JMeterTreeModel model, TestElement element) {
+        JMeterElementMetadata.normalize(element);
         JMeterTreeNode node = new JMeterTreeNode(element, model);
         try {
             node.setEnabled(element.isEnabled());

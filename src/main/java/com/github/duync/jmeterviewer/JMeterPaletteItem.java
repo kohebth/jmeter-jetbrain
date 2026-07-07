@@ -172,6 +172,14 @@ final class JMeterPaletteItem {
         return label;
     }
 
+    String guiClassName() {
+        return guiClassName;
+    }
+
+    String testClassName() {
+        return testClassName;
+    }
+
     TestElement createTestElement() throws ReflectiveOperationException {
         TestElement element = createViaGui();
         if (element == null && testClassName != null) {
@@ -235,8 +243,21 @@ final class JMeterPaletteItem {
     }
 
     private TestElement createViaGuiOrThrow() throws ReflectiveOperationException {
-        Object gui = JMeterPluginClasspath.loadClass(guiClassName).getDeclaredConstructor().newInstance();
+        Object gui = createGui();
         return ((JMeterGUIComponent) gui).createTestElement();
+    }
+
+    private Object createGui() throws ReflectiveOperationException {
+        Class<?> guiClass = JMeterPluginClasspath.loadClass(guiClassName);
+        if (isTestBeanGui() && testClassName != null) {
+            Class<?> testClass = JMeterPluginClasspath.loadClass(testClassName);
+            return guiClass.getDeclaredConstructor(Class.class).newInstance(testClass);
+        }
+        return guiClass.getDeclaredConstructor().newInstance();
+    }
+
+    private boolean isTestBeanGui() {
+        return "org.apache.jmeter.testbeans.gui.TestBeanGUI".equals(guiClassName);
     }
 
     private void applyCommonProperties(TestElement element) {
