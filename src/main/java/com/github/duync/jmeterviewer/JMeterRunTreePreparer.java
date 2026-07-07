@@ -67,9 +67,6 @@ final class JMeterRunTreePreparer {
         if (!hasValue(threadGroup, org.apache.jmeter.threads.ThreadGroup.RAMP_TIME)) {
             threadGroup.setRampUp(1);
         }
-        if (threadGroup.getDuration() > 0 && !threadGroup.getScheduler()) {
-            threadGroup.setScheduler(true);
-        }
     }
 
     private static boolean hasValue(TestElement element, String key) {

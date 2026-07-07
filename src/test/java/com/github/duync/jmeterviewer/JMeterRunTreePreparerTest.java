@@ -11,6 +11,7 @@ import org.apache.jorphan.collections.HashTree;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,16 +34,17 @@ final class JMeterRunTreePreparerTest {
     }
 
     @Test
-    void enablesSchedulerWhenDurationIsConfigured() {
+    void preservesSchedulerWhenDurationIsConfigured() {
         ThreadGroup threadGroup = new ThreadGroup();
         threadGroup.setName("Duration Group");
+        threadGroup.setScheduler(false);
         threadGroup.setDuration(1);
         HashTree tree = new HashTree();
         tree.add(threadGroup);
 
         JMeterRunTreePreparer.prepare(tree);
 
-        assertTrue(threadGroup.getScheduler());
+        assertFalse(threadGroup.getScheduler());
         assertEquals(1, threadGroup.getDuration());
     }
 
@@ -63,6 +65,29 @@ final class JMeterRunTreePreparerTest {
         LoopController prepared = assertInstanceOf(LoopController.class, threadGroup.getSamplerController());
         assertEquals(2, prepared.getLoops());
         assertEquals(before, prepared.getPropertyAsString("LoopController.continue_forever"));
+    }
+
+    @Test
+    void preservesExistingThreadGroupRuntimePropertiesBeforeRun() {
+        ThreadGroup threadGroup = new ThreadGroup();
+        threadGroup.setNumThreads(7);
+        threadGroup.setRampUp(3);
+        threadGroup.setScheduler(false);
+        threadGroup.setDuration(12);
+        threadGroup.setDelay(4);
+        threadGroup.setProperty(AbstractThreadGroup.ON_SAMPLE_ERROR, AbstractThreadGroup.ON_SAMPLE_ERROR_STOPTEST);
+        HashTree tree = new HashTree();
+        tree.add(threadGroup);
+
+        JMeterRunTreePreparer.prepare(tree);
+
+        assertEquals(7, threadGroup.getNumThreads());
+        assertEquals(3, threadGroup.getRampUp());
+        assertFalse(threadGroup.getScheduler());
+        assertEquals(12, threadGroup.getDuration());
+        assertEquals(4, threadGroup.getDelay());
+        assertEquals(AbstractThreadGroup.ON_SAMPLE_ERROR_STOPTEST,
+                threadGroup.getPropertyAsString(AbstractThreadGroup.ON_SAMPLE_ERROR));
     }
 
     @Test
