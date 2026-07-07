@@ -2,6 +2,7 @@ package com.github.duync.jmeterviewer;
 
 import com.intellij.ui.components.JBScrollPane;
 import org.apache.jmeter.samplers.SampleResult;
+import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.visualizers.ViewResultsFullVisualizer;
 
 import javax.swing.*;
@@ -39,6 +40,12 @@ final class JMeterNativeViewResultsTreePanel {
         }
         if (fallback != null) {
             fallback.setCaretPosition(0);
+        }
+    }
+
+    void configure(TestElement element) {
+        if (visualizer != null && element != null) {
+            visualizer.configure(element);
         }
     }
 

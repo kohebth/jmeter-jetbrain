@@ -3,6 +3,7 @@ package com.github.duync.jmeterviewer;
 import com.intellij.ui.JBSplitter;
 import com.intellij.ui.components.JBScrollPane;
 import org.apache.jmeter.samplers.SampleResult;
+import org.apache.jmeter.testelement.TestElement;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -70,6 +71,10 @@ final class JMeterResultsPanel {
 
     JComponent logComponent() {
         return new JBScrollPane(diagnosticLog);
+    }
+
+    void configureViewResultsTree(TestElement element) {
+        nativeViewResultsTree.configure(element);
     }
 
     void clear() {

@@ -223,6 +223,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
             return;
         }
         updateCurrentJMeterNode();
+        resultsPanel.configureViewResultsTree(JMeterViewResultsTreeLocator.find(model));
         resultsPanel.clear();
         resultsPanel.appendDiagnostic("Starting test");
         resultsPanel.runStarted();
@@ -233,24 +234,23 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
 
     private void showSelectedElement() {
         elementPanel.showSelected();
-        if (isViewResultsTreeSelected()) {
+        TestElement selected = selectedElement();
+        if (JMeterViewResultsTreeLocator.isViewResultsTree(selected)) {
+            resultsPanel.configureViewResultsTree(selected);
             resultsWorkspace.showViewResultsTree();
         }
     }
 
-    private boolean isViewResultsTreeSelected() {
+    private TestElement selectedElement() {
         GuiPackage guiPackage = GuiPackage.getInstance();
         if (guiPackage == null || guiPackage.getCurrentNode() == null) {
-            return false;
+            return null;
         }
         Object object = guiPackage.getCurrentNode().getUserObject();
         if (!(object instanceof TestElement)) {
-            return false;
+            return null;
         }
-        TestElement element = (TestElement) object;
-        return "ViewResultsFullVisualizer".equals(element.getPropertyAsString(TestElement.GUI_CLASS))
-                || "org.apache.jmeter.visualizers.ViewResultsFullVisualizer"
-                .equals(element.getPropertyAsString(TestElement.GUI_CLASS));
+        return (TestElement) object;
     }
 
     void stopTest() { runController.stop(); }
