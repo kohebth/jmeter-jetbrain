@@ -19,26 +19,32 @@ final class JMeterPalettePanel {
         DefaultListModel<JMeterPaletteItem> model = new DefaultListModel<>();
         JList<JMeterPaletteItem> list = new JList<>(model);
         JButton refresh = new JButton("Refresh");
-        refresh(model, "");
+        JLabel status = new JLabel();
+        refresh(model, "", status);
+        discover(model, filter, status);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setDragEnabled(true);
         list.setTransferHandler(new JMeterPaletteTransferHandler());
         list.setCellRenderer(new Renderer());
         new ListSpeedSearch<>(list, item -> item == null ? "" : item.toString());
-        filter.getDocument().addDocumentListener(new FilterListener(model, filter));
+        filter.getDocument().addDocumentListener(new FilterListener(model, filter, status));
         refresh.addActionListener(event -> {
             JMeterPaletteCatalog.reset();
-            refresh(model, filter.getText());
+            refresh(model, filter.getText(), status);
+            discover(model, filter, status);
         });
         JPanel top = new JPanel(new BorderLayout(4, 0));
         top.add(filter, BorderLayout.CENTER);
         top.add(refresh, BorderLayout.EAST);
+        JPanel bottom = new JPanel(new BorderLayout());
+        bottom.add(status, BorderLayout.WEST);
         panel.add(top, BorderLayout.NORTH);
         panel.add(new JBScrollPane(list), BorderLayout.CENTER);
+        panel.add(bottom, BorderLayout.SOUTH);
         return panel;
     }
 
-    private static void refresh(DefaultListModel<JMeterPaletteItem> model, String query) {
+    private static void refresh(DefaultListModel<JMeterPaletteItem> model, String query, JLabel status) {
         model.clear();
         String lowerQuery = query.trim().toLowerCase(Locale.ROOT);
         for (JMeterPaletteItem item : JMeterPaletteCatalog.items()) {
@@ -46,30 +52,40 @@ final class JMeterPalettePanel {
                 model.addElement(item);
             }
         }
+        status.setText(JMeterPaletteCatalog.isDiscovering()
+                ? "Discovering plugin elements..."
+                : model.getSize() + " elements");
+    }
+
+    private static void discover(DefaultListModel<JMeterPaletteItem> model, JTextField filter, JLabel status) {
+        status.setText("Discovering plugin elements...");
+        JMeterPaletteCatalog.discoverAsync(() -> refresh(model, filter.getText(), status));
     }
 
     private static final class FilterListener implements DocumentListener {
         private final DefaultListModel<JMeterPaletteItem> model;
         private final JTextField filter;
+        private final JLabel status;
 
-        private FilterListener(DefaultListModel<JMeterPaletteItem> model, JTextField filter) {
+        private FilterListener(DefaultListModel<JMeterPaletteItem> model, JTextField filter, JLabel status) {
             this.model = model;
             this.filter = filter;
+            this.status = status;
         }
 
         @Override
         public void insertUpdate(DocumentEvent event) {
-            refresh(model, filter.getText());
+            refresh(model, filter.getText(), status);
         }
 
         @Override
         public void removeUpdate(DocumentEvent event) {
-            refresh(model, filter.getText());
+            refresh(model, filter.getText(), status);
         }
 
         @Override
         public void changedUpdate(DocumentEvent event) {
-            refresh(model, filter.getText());
+            refresh(model, filter.getText(), status);
         }
     }
 
