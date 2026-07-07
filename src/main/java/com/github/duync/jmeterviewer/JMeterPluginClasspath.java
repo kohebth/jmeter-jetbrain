@@ -77,7 +77,7 @@ final class JMeterPluginClasspath {
     }
 
     static Class<?> loadClass(String className) throws ClassNotFoundException {
-        URLClassLoader classLoader = classLoader();
+        ClassLoader classLoader = activeClassLoader();
         if (classLoader != null) {
             try {
                 return Class.forName(className, true, classLoader);
@@ -88,11 +88,18 @@ final class JMeterPluginClasspath {
     }
 
     static void activate() {
-        URLClassLoader classLoader = classLoader();
-        if (classLoader != null) {
-            Thread.currentThread().setContextClassLoader(classLoader);
-        }
+        Thread.currentThread().setContextClassLoader(activeClassLoader());
         activateJMeterHome();
+    }
+
+    static ClassLoader activateThread() {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        activate();
+        return previous;
+    }
+
+    static void restoreThread(ClassLoader previous) {
+        Thread.currentThread().setContextClassLoader(previous);
     }
 
     private static void add(File file) {
@@ -192,6 +199,11 @@ final class JMeterPluginClasspath {
             loader = new URLClassLoader(urls(), JMeterPluginClasspath.class.getClassLoader());
         }
         return loader;
+    }
+
+    private static ClassLoader activeClassLoader() {
+        URLClassLoader classLoader = classLoader();
+        return classLoader == null ? JMeterPluginClasspath.class.getClassLoader() : classLoader;
     }
 
     private static URL[] urls() {

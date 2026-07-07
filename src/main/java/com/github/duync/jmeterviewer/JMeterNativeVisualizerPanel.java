@@ -71,6 +71,7 @@ final class JMeterNativeVisualizerPanel {
         JMeterGUIComponent createdGui = null;
         JTextArea error = null;
         panel.removeAll();
+        ClassLoader previousLoader = JMeterPluginClasspath.activateThread();
         try {
             EmbeddedJMeterRuntime.ensureReady();
             Object instance = JMeterPluginClasspath.loadClass(className).getDeclaredConstructor().newInstance();
@@ -88,9 +89,11 @@ final class JMeterNativeVisualizerPanel {
                 panel.add(new JBScrollPane(error), BorderLayout.CENTER);
             }
         } catch (Exception | LinkageError exception) {
-            error = new JTextArea("Unable to create " + label + ":\n" + exception);
+            error = new JTextArea("Unable to create " + label + ":\n" + rootCause(exception));
             error.setEditable(false);
             panel.add(new JBScrollPane(error), BorderLayout.CENTER);
+        } finally {
+            JMeterPluginClasspath.restoreThread(previousLoader);
         }
         visualizer = createdVisualizer;
         clearable = createdClearable;
@@ -98,5 +101,13 @@ final class JMeterNativeVisualizerPanel {
         fallback = error;
         panel.revalidate();
         panel.repaint();
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable current = throwable;
+        while (current instanceof java.lang.reflect.InvocationTargetException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 }

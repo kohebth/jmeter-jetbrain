@@ -62,7 +62,7 @@ final class JMeterRunController {
             if (options != null && options.resultFile() != null) {
                 collector.setFilename(options.resultFile());
             }
-            testTree.add(collector);
+            JMeterRunListenerAttacher.attach(testTree, collector);
             for (JMeterEngine engine : engines) {
                 engine.configure(testTree);
             }
