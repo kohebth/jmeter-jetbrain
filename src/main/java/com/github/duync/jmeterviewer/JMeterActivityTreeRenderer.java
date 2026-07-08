@@ -26,23 +26,38 @@ final class JMeterActivityTreeRenderer implements TreeCellRenderer {
                                                   boolean hasFocus) {
         Component component = delegate.getTreeCellRendererComponent(
                 tree, value, selected, expanded, leaf, row, hasFocus);
-        String label = activityLabel(value);
-        if (!label.isEmpty() && component instanceof JLabel) {
+        if (component instanceof JLabel) {
             JLabel text = (JLabel) component;
-            text.setText(text.getText() + " " + label);
+            text.setText(text.getText() + suffix(value));
         }
         return component;
     }
 
-    private String activityLabel(Object value) {
-        if (!(value instanceof JMeterTreeNode)) {
+    private String suffix(Object value) {
+        TestElement element = element(value);
+        if (element == null) {
             return "";
+        }
+        String type = JMeterElementTypeLabel.of(element);
+        String activityText = activity.label(element);
+        StringBuilder builder = new StringBuilder();
+        if (!type.isEmpty()) {
+            builder.append(" [").append(type).append("]");
+        }
+        if (!activityText.isEmpty()) {
+            builder.append(" ").append(activityText);
+        }
+        return builder.toString();
+    }
+
+    private TestElement element(Object value) {
+        if (!(value instanceof JMeterTreeNode)) {
+            return null;
         }
         Object userObject = ((JMeterTreeNode) value).getUserObject();
         if (!(userObject instanceof TestElement)) {
-            return "";
+            return null;
         }
-        TestElement element = (TestElement) userObject;
-        return activity.label(element);
+        return (TestElement) userObject;
     }
 }

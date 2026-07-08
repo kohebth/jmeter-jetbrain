@@ -1,5 +1,7 @@
 package com.github.duync.jmeterviewer;
 
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.ui.components.JBScrollPane;
 import org.apache.jmeter.gui.JMeterGUIComponent;
 import org.apache.jmeter.samplers.Clearable;
@@ -19,7 +21,9 @@ final class JMeterNativeVisualizerPanel {
     private Clearable clearable;
     private JMeterGUIComponent guiComponent;
     private JTextArea fallback;
+    private TestElement pendingConfiguration;
     private boolean loaded;
+    private boolean loading;
 
     JMeterNativeVisualizerPanel(String label, String className) {
         this.label = label;
@@ -49,7 +53,14 @@ final class JMeterNativeVisualizerPanel {
         if (element == null) {
             return;
         }
-        load();
+        pendingConfiguration = element;
+        if (!loaded && !panel.isShowing()) {
+            return;
+        }
+        if (!loaded) {
+            load();
+            return;
+        }
         if (guiComponent != null) {
             guiComponent.configure(element);
         }
@@ -62,10 +73,45 @@ final class JMeterNativeVisualizerPanel {
     }
 
     private void load() {
-        if (loaded) {
+        if (loaded || loading) {
             return;
         }
-        loaded = true;
+        loading = true;
+        panel.removeAll();
+        panel.add(new JLabel("Loading " + label + "..."), BorderLayout.NORTH);
+        panel.revalidate();
+        panel.repaint();
+        Application application = ApplicationManager.getApplication();
+        if (application == null) {
+            preloadClass(false);
+        } else {
+            application.executeOnPooledThread(() -> preloadClass(true));
+        }
+    }
+
+    private void preloadClass(boolean finishOnEdt) {
+        Class<?> loadedClass = null;
+        Throwable failure = null;
+        ClassLoader previousLoader = Thread.currentThread().getContextClassLoader();
+        try {
+            EmbeddedJMeterRuntime.ensureReady();
+            previousLoader = JMeterPluginClasspath.activateThread();
+            loadedClass = JMeterPluginClasspath.loadClass(className);
+        } catch (Throwable throwable) {
+            failure = throwable;
+        } finally {
+            JMeterPluginClasspath.restoreThread(previousLoader);
+        }
+        Class<?> resolvedClass = loadedClass;
+        Throwable resolvedFailure = failure;
+        if (finishOnEdt) {
+            SwingUtilities.invokeLater(() -> finishLoad(resolvedClass, resolvedFailure));
+        } else {
+            finishLoad(resolvedClass, resolvedFailure);
+        }
+    }
+
+    private void finishLoad(Class<?> visualizerClass, Throwable preloadFailure) {
         Visualizer createdVisualizer = null;
         Clearable createdClearable = null;
         JMeterGUIComponent createdGui = null;
@@ -73,24 +119,17 @@ final class JMeterNativeVisualizerPanel {
         panel.removeAll();
         ClassLoader previousLoader = Thread.currentThread().getContextClassLoader();
         try {
-            EmbeddedJMeterRuntime.ensureReady();
+            if (preloadFailure != null) {
+                throw preloadFailure;
+            }
             previousLoader = JMeterPluginClasspath.activateThread();
-            Object instance = JMeterPluginClasspath.loadClass(className).getDeclaredConstructor().newInstance();
+            Object instance = visualizerClass.getDeclaredConstructor().newInstance();
             createdVisualizer = instance instanceof Visualizer ? (Visualizer) instance : null;
             createdClearable = instance instanceof Clearable ? (Clearable) instance : null;
             createdGui = instance instanceof JMeterGUIComponent ? (JMeterGUIComponent) instance : null;
-            if (instance instanceof JComponent) {
-                JComponent component = (JComponent) instance;
-                component.setName(label);
-                JMeterTabOverflowSupport.apply(component);
-                panel.add(component, BorderLayout.CENTER);
-            } else {
-                error = new JTextArea(className + " is not a Swing component.");
-                error.setEditable(false);
-                panel.add(new JBScrollPane(error), BorderLayout.CENTER);
-            }
-        } catch (Exception | LinkageError exception) {
-            error = new JTextArea("Unable to create " + label + ":\n" + rootCause(exception));
+            error = addInstance(instance);
+        } catch (Throwable throwable) {
+            error = new JTextArea("Unable to create " + label + ":\n" + rootCause(throwable));
             error.setEditable(false);
             panel.add(new JBScrollPane(error), BorderLayout.CENTER);
         } finally {
@@ -100,8 +139,30 @@ final class JMeterNativeVisualizerPanel {
         clearable = createdClearable;
         guiComponent = createdGui;
         fallback = error;
+        loading = false;
+        loaded = true;
+        applyPendingConfiguration();
         panel.revalidate();
         panel.repaint();
+    }
+
+    private JTextArea addInstance(Object instance) {
+        if (instance instanceof JComponent) {
+            JComponent component = (JComponent) instance;
+            component.setName(label);
+            panel.add(component, BorderLayout.CENTER);
+            return null;
+        }
+        JTextArea error = new JTextArea(className + " is not a Swing component.");
+        error.setEditable(false);
+        panel.add(new JBScrollPane(error), BorderLayout.CENTER);
+        return error;
+    }
+
+    private void applyPendingConfiguration() {
+        if (guiComponent != null && pendingConfiguration != null) {
+            guiComponent.configure(pendingConfiguration);
+        }
     }
 
     private Throwable rootCause(Throwable throwable) {

@@ -22,7 +22,6 @@ final class JMeterVisualModelInstaller {
                              JPanel component,
                              JMeterEditorToolbarState toolbarState,
                              JMeterElementPanel elementPanel,
-                             JMeterSourcePanel sourcePanel,
                              JMeterResultsPanel resultsPanel,
                              JMeterResultsWorkspace resultsWorkspace,
                              JMeterThreadGroupActivity threadGroupActivity,
@@ -59,10 +58,9 @@ final class JMeterVisualModelInstaller {
         component.removeAll();
         component.add(JMeterToolbarFactory.create(project, () -> model, toolbarState,
                 treeActions, fileActions, addDialog, templateDialog, commandPalette, search), BorderLayout.NORTH);
-        sourcePanel.refresh();
-        component.add(JMeterEditorBody.create(tree, elementPanel.component(), sourcePanel), BorderLayout.CENTER);
+        component.add(JMeterEditorBody.create(tree, elementPanel.component()), BorderLayout.CENTER);
         selectInitialNode(model, tree);
-        return new Installed(tree, commandPalette, templateDialog);
+        return new Installed(tree, treeActions, commandPalette, templateDialog);
     }
 
     private static void selectInitialNode(JMeterTreeModel model, JTree tree) {
@@ -85,6 +83,9 @@ final class JMeterVisualModelInstaller {
                                             JMeterResultsWorkspace resultsWorkspace) {
         elementPanel.showSelected();
         TestElement selected = selectedElement();
+        JMeterActionTrace.info("editor.tree.selection",
+                selected == null ? "node=<none>" : "node=\"" + selected.getName() + "\" type="
+                        + selected.getClass().getSimpleName());
         JMeterNativeResultView view = resultsPanel.nativeViewFor(selected);
         if (view != null) {
             resultsPanel.configureNativeResultView(view, selected);
@@ -103,17 +104,26 @@ final class JMeterVisualModelInstaller {
 
     static final class Installed {
         private final JTree tree;
+        private final JMeterTreeActions treeActions;
         private final JMeterCommandPalette commandPalette;
         private final JMeterTemplateDialog templateDialog;
 
-        private Installed(JTree tree, JMeterCommandPalette commandPalette, JMeterTemplateDialog templateDialog) {
+        private Installed(JTree tree,
+                          JMeterTreeActions treeActions,
+                          JMeterCommandPalette commandPalette,
+                          JMeterTemplateDialog templateDialog) {
             this.tree = tree;
+            this.treeActions = treeActions;
             this.commandPalette = commandPalette;
             this.templateDialog = templateDialog;
         }
 
         JTree tree() {
             return tree;
+        }
+
+        JMeterTreeActions treeActions() {
+            return treeActions;
         }
 
         JMeterCommandPalette commandPalette() {

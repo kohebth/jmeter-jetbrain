@@ -14,6 +14,7 @@ import javax.swing.tree.TreeSelectionModel;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.EnumSet;
 
 final class JMeterResultsPanel {
     private final JMeterSampleResultTableModel sampleResultModel;
@@ -88,6 +89,10 @@ final class JMeterResultsPanel {
 
     void configureNativeResultViews(JMeterTreeModel model) {
         nativeResultViews.configureFromModel(model);
+    }
+
+    EnumSet<JMeterNativeResultView> availableNativeResultViews(JMeterTreeModel model) {
+        return nativeResultViews.availableViews(model);
     }
 
     void configureNativeResultView(JMeterNativeResultView view, TestElement element) {

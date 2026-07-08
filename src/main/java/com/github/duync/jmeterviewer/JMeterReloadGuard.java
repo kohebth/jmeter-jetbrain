@@ -18,4 +18,18 @@ final class JMeterReloadGuard {
                 Messages.getQuestionIcon()
         ) == Messages.YES;
     }
+
+    static boolean canReloadExternalChange(Project project, boolean modified) {
+        String message = modified
+                ? "The JMX file was saved in the text editor. Reloading will discard unsaved JMeter visual changes. Reload now?"
+                : "The JMX file was saved in the text editor. Reload the JMeter view now?";
+        return Messages.showYesNoDialog(
+                project,
+                message,
+                "Reload JMeter View",
+                "Reload",
+                "Keep Current View",
+                Messages.getQuestionIcon()
+        ) == Messages.YES;
+    }
 }

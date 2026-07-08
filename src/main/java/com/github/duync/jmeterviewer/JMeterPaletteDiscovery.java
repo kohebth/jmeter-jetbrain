@@ -1,12 +1,10 @@
 package com.github.duync.jmeterviewer;
 
 import org.apache.jmeter.gui.JMeterGUIComponent;
-import org.apache.jmeter.gui.util.MenuInfo;
 import org.apache.jmeter.gui.util.MenuFactory;
 import org.apache.jmeter.testbeans.TestBean;
 import org.apache.jmeter.testelement.TestElement;
 
-import java.lang.reflect.Method;
 import java.util.*;
 
 final class JMeterPaletteDiscovery {
@@ -22,21 +20,7 @@ final class JMeterPaletteDiscovery {
         }
         ClassLoader previous = JMeterPluginClasspath.activateThread();
         try {
-            for (Map.Entry<String, List<MenuInfo>> entry : menuMap().entrySet()) {
-                JMeterPaletteItem.Kind kind = kindFor(entry.getKey());
-                if (kind == null) {
-                    continue;
-                }
-                for (MenuInfo info : entry.getValue()) {
-                    JMeterPaletteItem item = itemFor(info, kind);
-                    if (item != null) {
-                        items.add(item);
-                    }
-                }
-            }
-            if (items.isEmpty()) {
-                items.addAll(scanSearchPaths());
-            }
+            items.addAll(scanSearchPaths());
         } finally {
             JMeterPluginClasspath.restoreThread(previous);
         }
@@ -44,21 +28,10 @@ final class JMeterPaletteDiscovery {
         return items;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, List<MenuInfo>> menuMap() {
-        try {
-            Method method = MenuFactory.class.getDeclaredMethod("getMenuMap");
-            method.setAccessible(true);
-            return (Map<String, List<MenuInfo>>) method.invoke(null);
-        } catch (Throwable exception) {
-            return Collections.emptyMap();
-        }
-    }
-
     private static List<JMeterPaletteItem> scanSearchPaths() {
         List<JMeterPaletteItem> items = new ArrayList<>();
         for (String className : JMeterPaletteClassScanner.classNames()) {
-            if (isAddableClass(className)) {
+            if (isPaletteCandidate(className) && isAddableClass(className)) {
                 JMeterPaletteItem item = itemFor(className);
                 if (item != null) {
                     items.add(item);
@@ -70,37 +43,20 @@ final class JMeterPaletteDiscovery {
 
     private static boolean isAddableClass(String className) {
         try {
-            Class<?> type = JMeterPluginClasspath.loadClass(className);
+            Class<?> type = JMeterPluginClasspath.loadClassLazy(className);
             return JMeterGUIComponent.class.isAssignableFrom(type) || TestBean.class.isAssignableFrom(type);
         } catch (Exception | LinkageError ignored) {
             return false;
         }
     }
 
-
-    private static JMeterPaletteItem itemFor(MenuInfo info, JMeterPaletteItem.Kind kind) {
-        try {
-            String className = info.getClassName();
-            Class<?> componentClass = JMeterPluginClasspath.loadClass(className);
-            if (TestBean.class.isAssignableFrom(componentClass)) {
-                return JMeterPaletteItem.discovered(
-                        info.getLabel(), kind,
-                        "org.apache.jmeter.testbeans.gui.TestBeanGUI",
-                        className);
-            }
-            if (!JMeterGUIComponent.class.isAssignableFrom(componentClass)) {
-                return null;
-            }
-            JMeterGUIComponent gui = (JMeterGUIComponent) componentClass.getDeclaredConstructor().newInstance();
-            if (!gui.canBeAdded()) {
-                return null;
-            }
-            TestElement element = gui.createTestElement();
-            String testClass = element == null ? null : element.getClass().getName();
-            return JMeterPaletteItem.discovered(info.getLabel(), kind, className, testClass);
-        } catch (Exception | LinkageError error) {
-            return null;
-        }
+    private static boolean isPaletteCandidate(String className) {
+        return className.contains(".gui.")
+                || className.endsWith("Gui")
+                || className.endsWith("GUI")
+                || className.endsWith("Panel")
+                || className.contains(".visualizers.")
+                || className.contains(".testbeans.");
     }
 
     private static JMeterPaletteItem itemFor(String className) {

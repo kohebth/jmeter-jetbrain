@@ -10,7 +10,7 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 
 final class JMeterResultDetailTabs {
-    private final JTabbedPane tabs = new JTabbedPane();
+    private final JTabbedPane tabs = JMeterTabOverflowSupport.createTabbedPane();
     private final JPanel panel = new JPanel(new BorderLayout());
     private final JTextArea sampler = area();
     private final JTextArea request = area();
@@ -22,7 +22,6 @@ final class JMeterResultDetailTabs {
     private String renderedText = "";
 
     JMeterResultDetailTabs() {
-        JMeterTabOverflowSupport.apply(tabs);
         panel.add(toolbar(), BorderLayout.NORTH);
         tabs.addTab("Sampler Result", new JBScrollPane(sampler));
         tabs.addTab("Request", new JBScrollPane(request));

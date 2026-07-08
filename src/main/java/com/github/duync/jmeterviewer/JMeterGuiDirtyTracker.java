@@ -3,11 +3,14 @@ package com.github.duync.jmeterviewer;
 import javax.swing.*;
 import javax.swing.event.*;
 import javax.swing.table.TableModel;
+import javax.swing.text.Document;
 import javax.swing.text.JTextComponent;
 import java.awt.*;
 
 final class JMeterGuiDirtyTracker {
     private static final String ATTACHED = JMeterGuiDirtyTracker.class.getName() + ".attached";
+    private static final String TEXT_DOCUMENT = JMeterGuiDirtyTracker.class.getName() + ".textDocument";
+    private static final String TABLE_MODEL = JMeterGuiDirtyTracker.class.getName() + ".tableModel";
     private final Runnable dirty;
 
     JMeterGuiDirtyTracker(Runnable dirty) {
@@ -27,13 +30,16 @@ final class JMeterGuiDirtyTracker {
     }
 
     private void attach(Component component) {
+        if (component instanceof JTextComponent) {
+            attachText((JTextComponent) component);
+        }
+        if (component instanceof JTable) {
+            attachTable((JTable) component);
+        }
         if (isAttached(component)) {
             return;
         }
         markAttached(component);
-        if (component instanceof JTextComponent) {
-            attachText((JTextComponent) component);
-        }
         if (component instanceof AbstractButton) {
             attachButton((AbstractButton) component);
         }
@@ -45,9 +51,6 @@ final class JMeterGuiDirtyTracker {
         }
         if (component instanceof JSlider) {
             attachSlider((JSlider) component);
-        }
-        if (component instanceof JTable) {
-            attachTable((JTable) component);
         }
     }
 
@@ -63,7 +66,12 @@ final class JMeterGuiDirtyTracker {
     }
 
     private void attachText(JTextComponent component) {
-        component.getDocument().addDocumentListener(new DocumentListener() {
+        Document document = component.getDocument();
+        if (document == null || document == component.getClientProperty(TEXT_DOCUMENT)) {
+            return;
+        }
+        component.putClientProperty(TEXT_DOCUMENT, document);
+        document.addDocumentListener(new DocumentListener() {
             @Override
             public void insertUpdate(DocumentEvent event) {
                 dirty.run();
@@ -101,7 +109,8 @@ final class JMeterGuiDirtyTracker {
 
     private void attachTable(JTable table) {
         TableModel model = table.getModel();
-        if (model != null) {
+        if (model != null && model != table.getClientProperty(TABLE_MODEL)) {
+            table.putClientProperty(TABLE_MODEL, model);
             model.addTableModelListener(event -> dirty.run());
         }
     }

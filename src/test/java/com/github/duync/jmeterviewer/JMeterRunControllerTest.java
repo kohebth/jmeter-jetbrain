@@ -3,6 +3,8 @@ package com.github.duync.jmeterviewer;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.engine.StandardJMeterEngine;
 import org.apache.jmeter.engine.util.NoThreadClone;
+import org.apache.jmeter.gui.GuiPackage;
+import org.apache.jmeter.gui.tree.JMeterTreeListener;
 import org.apache.jmeter.gui.tree.JMeterTreeNode;
 import org.apache.jmeter.samplers.SampleEvent;
 import org.apache.jmeter.samplers.SampleListener;
@@ -89,6 +91,27 @@ final class JMeterRunControllerTest {
             assertEquals(1, listener.samples.get());
             assertTrue(listener.threadNames.stream().allMatch(name -> name.startsWith("Second Group ")),
                     "Expected only Second Group samples, got " + listener.threadNames);
+            assertFalse(controller.isRunning());
+        } finally {
+            controller.stop();
+            controller.exitEngines();
+        }
+    }
+
+    @Test
+    void localRunFinishesWhenEmbeddedGuiPackageHasNoMainFrame() throws Exception {
+        EmbeddedJMeterRuntime.ensureReady();
+        RecordingListener listener = new RecordingListener();
+        JMeterRunController controller = new JMeterRunController(listener);
+        JMeterTreeModel model = singleLoopModel();
+        GuiPackage.initInstance(new JMeterTreeListener(model), model);
+
+        try {
+            controller.start(model, null, JMeterRunController.RunTarget.LOCAL);
+
+            assertTrue(listener.finished.await(10, TimeUnit.SECONDS),
+                    "Expected run to finish without touching JMeter MainFrame; " + listener.diagnostics());
+            assertEquals(1, listener.samples.get());
             assertFalse(controller.isRunning());
         } finally {
             controller.stop();

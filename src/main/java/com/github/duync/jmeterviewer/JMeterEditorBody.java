@@ -9,15 +9,10 @@ final class JMeterEditorBody {
     private JMeterEditorBody() {
     }
 
-    static JComponent create(JTree tree, JComponent details, JMeterSourcePanel sourcePanel) {
+    static JComponent create(JTree tree, JComponent details) {
         JBSplitter treeAndDetails = new JBSplitter(false, 0.34f);
         treeAndDetails.setFirstComponent(new JBScrollPane(tree));
         treeAndDetails.setSecondComponent(details);
-
-        JTabbedPane tabs = new JTabbedPane();
-        JMeterTabOverflowSupport.apply(tabs);
-        tabs.addTab("Visual", treeAndDetails);
-        tabs.addTab("JMX Source", sourcePanel.component());
-        return tabs;
+        return treeAndDetails;
     }
 }

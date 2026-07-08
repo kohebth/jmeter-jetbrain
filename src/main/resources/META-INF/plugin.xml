@@ -12,14 +12,13 @@
     <extensions defaultExtensionNs="com.intellij">
         <fileType
                 name="JMeter Test Plan"
-                language="JMeter"
+                language="XML"
                 implementationClass="com.github.duync.jmeterviewer.JMeterFileType"
                 fieldName="INSTANCE"
                 extensions="jmx"/>
         <fileEditorProvider implementation="com.github.duync.jmeterviewer.JMeterFileEditorProvider"/>
-        <postStartupActivity implementation="com.github.duync.jmeterviewer.JMeterStartupActivity"/>
         <psiStructureViewFactory
-                language="JMeter"
+                language="XML"
                 implementationClass="com.github.duync.jmeterviewer.JMeterStructureViewFactory"/>
         <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterResultsWorkspace"/>
         <projectService serviceImplementation="com.github.duync.jmeterviewer.JMeterPluginClasspathStore"/>

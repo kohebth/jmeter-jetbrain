@@ -40,6 +40,10 @@ final class JMeterElementPanel {
         refresh();
     }
 
+    void watchVisibleControls() {
+        dirtyTracker.watch(panel);
+    }
+
     void showError(String message) {
         errorPane.setText(message);
         panel.removeAll();

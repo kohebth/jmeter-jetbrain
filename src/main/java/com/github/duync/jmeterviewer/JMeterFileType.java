@@ -3,6 +3,7 @@ package com.github.duync.jmeterviewer;
 import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.util.NlsContexts.Label;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.lang.xml.XMLLanguage;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -13,7 +14,7 @@ public final class JMeterFileType extends LanguageFileType {
     public static final JMeterFileType INSTANCE = new JMeterFileType();
 
     private JMeterFileType() {
-        super(JMeterLanguage.INSTANCE);
+        super(XMLLanguage.INSTANCE);
     }
 
     @Override
@@ -33,7 +34,7 @@ public final class JMeterFileType extends LanguageFileType {
 
     @Override
     public @Nullable Icon getIcon() {
-        return null;
+        return JMeterIcons.FILE;
     }
 
     @Override

@@ -1,5 +1,12 @@
 package com.github.duync.jmeterviewer;
 
+import org.apache.jmeter.config.Arguments;
+import org.apache.jmeter.config.gui.ArgumentsPanel;
+import org.apache.jmeter.control.LoopController;
+import org.apache.jmeter.control.gui.LoopControlPanel;
+import org.apache.jmeter.testelement.TestPlan;
+import org.apache.jmeter.testelement.property.JMeterProperty;
+import org.apache.jmeter.threads.AbstractThreadGroup;
 import org.apache.jmeter.testelement.TestElement;
 
 final class JMeterElementMetadata {
@@ -12,6 +19,8 @@ final class JMeterElementMetadata {
         }
         ensureTestClass(element);
         ensureGuiClass(element);
+        ensureTestPlanVariables(element);
+        ensureThreadGroupController(element);
     }
 
     private static void ensureTestClass(TestElement element) {
@@ -36,5 +45,50 @@ final class JMeterElementMetadata {
     private static boolean hasValue(TestElement element, String key) {
         String value = element.getPropertyAsString(key);
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static void ensureTestPlanVariables(TestElement element) {
+        if (!(element instanceof TestPlan)) {
+            return;
+        }
+
+        TestPlan testPlan = (TestPlan) element;
+        JMeterProperty property = testPlan.getUserDefinedVariablesAsProperty();
+        Object value = property == null ? null : property.getObjectValue();
+        if (value instanceof Arguments) {
+            normalize((Arguments) value);
+            return;
+        }
+
+        Arguments arguments = new Arguments();
+        arguments.setName("User Defined Variables");
+        assignClasses(arguments, ArgumentsPanel.class, Arguments.class);
+        testPlan.setUserDefinedVariables(arguments);
+    }
+
+    private static void ensureThreadGroupController(TestElement element) {
+        if (!(element instanceof AbstractThreadGroup)) {
+            return;
+        }
+
+        AbstractThreadGroup threadGroup = (AbstractThreadGroup) element;
+        JMeterProperty property = threadGroup.getProperty(AbstractThreadGroup.MAIN_CONTROLLER);
+        Object value = property == null ? null : property.getObjectValue();
+        if (value instanceof LoopController) {
+            normalize((LoopController) value);
+            return;
+        }
+
+        LoopController controller = new LoopController();
+        controller.setName("Loop Controller");
+        controller.setLoops(1);
+        controller.setContinueForever(false);
+        assignClasses(controller, LoopControlPanel.class, LoopController.class);
+        threadGroup.setSamplerController(controller);
+    }
+
+    private static void assignClasses(TestElement element, Class<?> guiClass, Class<?> testClass) {
+        element.setProperty(TestElement.GUI_CLASS, guiClass.getName());
+        element.setProperty(TestElement.TEST_CLASS, testClass.getName());
     }
 }

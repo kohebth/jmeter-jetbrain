@@ -6,7 +6,9 @@ import com.intellij.openapi.fileEditor.FileEditorLocation;
 import com.intellij.openapi.fileEditor.FileEditorState;
 import com.intellij.openapi.fileEditor.FileEditorStateLevel;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBScrollPane;
@@ -30,17 +32,8 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     private final JMeterElementPanel elementPanel;
     private final JEditorPane errorPane;
     private final PropertyChangeSupport propertyChangeSupport;
-    private final JButton saveButton;
-    private final JButton reloadButton;
-    private final JButton runButton;
-    private final JButton runSelectedButton;
-    private final JButton runLocalButton;
-    private final JButton runRemoteButton;
-    private final JButton runAllButton;
-    private final JButton stopButton;
-    private final JButton shutdownButton;
-    private final JButton resetEnginesButton;
-    private final JButton exitEnginesButton;
+    private final JButton saveButton, reloadButton, runButton, runSelectedButton, runLocalButton;
+    private final JButton runRemoteButton, runAllButton, stopButton, shutdownButton, resetEnginesButton, exitEnginesButton;
     private final JMeterEditorToolbarState toolbarState;
     private final JMeterValidationAction validationAction;
     private final JMeterStatsAction statsAction;
@@ -53,16 +46,21 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     private final JMeterRunOptions runOptions;
     private final JMeterThreadControlPanel threadControl;
     private final JMeterThreadGroupActivity threadGroupActivity;
-    private final JMeterSourcePanel sourcePanel;
     private final JMeterRunController runController;
     private final JMeterVisualRunActions runActions;
     private final JMeterIdeUndoSupport undoSupport;
+    private final UserDataHolderBase userData;
+    private final Disposable editorDisposable;
     private JMeterTreeModel model;
     private JTree tree;
+    private JMeterTreeActions treeActions;
     private JMeterCommandPalette commandPalette;
     private JMeterTemplateDialog templateDialog;
     private boolean modified;
     private boolean updatingCurrentNode;
+    private boolean disposed;
+    private boolean suppressNextFileChange;
+    private int suppressedGuiDirtyEvents;
 
     public JMeterVisualFileEditor(Project project, VirtualFile file) {
         this.project = project;
@@ -71,6 +69,8 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         this.elementPanel = new JMeterElementPanel(this::markGuiModified);
         this.errorPane = new JEditorPane("text/plain", "");
         this.propertyChangeSupport = new PropertyChangeSupport(this);
+        this.editorDisposable = Disposer.newDisposable("JMeter visual editor " + file.getPath());
+        Disposer.register(project, editorDisposable);
         this.saveButton = new JButton("Save");
         this.reloadButton = new JButton("Reload");
         this.runButton = new JButton("Run Plan");
@@ -94,12 +94,11 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         this.threadGroupActivity = new JMeterThreadGroupActivity();
         this.runController = new JMeterRunController(
                 new JMeterEditorRunListener(this::setRunStatus, resultsPanel, threadGroupActivity));
-        this.runActions = new JMeterVisualRunActions(() -> model, () -> tree, this::updateCurrentJMeterNode,
+        this.runActions = new JMeterVisualRunActions(() -> model, () -> tree, this::flushGuiChanges,
                 resultsWorkspace, resultsPanel, threadGroupActivity, runController, runOptions, this::setRunStatus);
         this.threadControl = new JMeterThreadControlPanel(runController);
-        this.sourcePanel = new JMeterSourcePanel(project, file, this::load,
-                this::updateCurrentJMeterNode, () -> model, this);
         this.undoSupport = new JMeterIdeUndoSupport(project, file, this::restoreModel);
+        this.userData = new UserDataHolderBase();
         this.toolbarState = new JMeterEditorToolbarState(saveButton, reloadButton, runButton, runSelectedButton,
                 runLocalButton,
                 runRemoteButton, runAllButton, stopButton,
@@ -108,17 +107,8 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
 
         JMeterEditorControls.wire(
                 component,
-                saveButton,
-                reloadButton,
-                runButton,
-                runSelectedButton,
-                runLocalButton,
-                runRemoteButton,
-                runAllButton,
-                stopButton,
-                shutdownButton,
-                resetEnginesButton,
-                exitEnginesButton,
+                editorDisposable,
+                toolbarState,
                 this::save,
                 this::reloadFromFile,
                 runActions::runAuto,
@@ -130,37 +120,47 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
                 validationAction,
                 this::showCommands
         );
-        JMeterFileChangeWatcher.install(file, this, this::isModified, this::load);
+        JMeterEditorShortcuts.installTreeEditing(component, editorDisposable, () -> treeActions);
+        JMeterFileChangeWatcher.install(file, editorDisposable, this::handleExternalFileChange, this::load);
         load();
     }
 
     void reloadFromFile() {
+        JMeterActionTrace.info("editor.reload.request", traceState());
         if (JMeterReloadGuard.canDiscard(project, modified)) {
             load();
+        } else {
+            JMeterActionTrace.info("editor.reload.cancelled", traceState());
         }
     }
 
     private void load() {
         try {
+            JMeterActionTrace.info("editor.load.start", traceState());
             EmbeddedJMeterRuntime.ensureReady();
             JMeterPluginClasspathStore.get(project).applyToClasspath();
             model = JMeterTreeLoader.load(new File(file.getPath()));
             undoSupport.reset(model);
             installModel();
             setModified(false);
+            JMeterActionTrace.info("editor.load.success", traceState());
         } catch (Exception exception) {
+            JMeterActionTrace.warn("editor.load.failed " + traceState(), exception);
             JMeterIdeNotifications.error(project, "Unable to load JMX: " + exception.getMessage());
             showLoadError(exception);
         }
     }
 
     private void installModel() {
+        JMeterActionTrace.info("editor.model.install", traceState());
         JMeterVisualModelInstaller.Installed installed = JMeterVisualModelInstaller.install(
-                project, model, component, toolbarState, elementPanel, sourcePanel, resultsPanel, resultsWorkspace,
+                project, model, component, toolbarState, elementPanel, resultsPanel, resultsWorkspace,
                 threadGroupActivity, this::markTreeModified);
         tree = installed.tree();
+        treeActions = installed.treeActions();
         commandPalette = installed.commandPalette();
         templateDialog = installed.templateDialog();
+        refreshResultTabs();
     }
 
     void showCommands() { if (commandPalette != null) commandPalette.show(); }
@@ -173,29 +173,51 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         setModified(true);
     }
 
-    void save() {
-        save(true);
-    }
+    void save() { save(true); }
 
-    void saveSilently() {
-        save(false);
-    }
+    void saveSilently() { save(false); }
 
     private void save(boolean notifySuccess) {
-        updateCurrentJMeterNode();
+        JMeterActionTrace.info("editor.save.start", traceState());
+        flushGuiChanges();
+        suppressNextFileChange = true;
         if (JMeterFileSaver.save(project, file, model, elementPanel, notifySuccess)) {
-            sourcePanel.refresh();
             setModified(false);
+            JMeterActionTrace.info("editor.save.success", traceState());
+        } else {
+            suppressNextFileChange = false;
+            JMeterActionTrace.info("editor.save.failed", traceState());
         }
     }
 
-    void runTest() { runActions.runAuto(); }
+    private void handleExternalFileChange() {
+        if (suppressNextFileChange) {
+            suppressNextFileChange = false;
+            JMeterActionTrace.info("editor.file.change.ignored", traceState());
+            return;
+        }
+        JMeterActionTrace.info("editor.file.change.external", traceState());
+        if (JMeterReloadGuard.canReloadExternalChange(project, modified)) {
+            load();
+        } else {
+            JMeterActionTrace.info("editor.file.change.reload.cancelled", traceState());
+        }
+    }
 
-    void stopTest() { runController.stop(); }
+    void runTest() {
+        JMeterActionTrace.info("editor.run.action", traceState());
+        runActions.runAuto();
+    }
+
+    void stopTest() {
+        JMeterActionTrace.info("editor.stop.action", traceState());
+        runController.stop();
+    }
 
     void validatePlan() { validationAction.validateNow(); }
 
     private void setRunStatus(String status) {
+        JMeterActionTrace.info("editor.run.status", "status=\"" + status + "\" " + traceState());
         runStatusLabel.setText(status);
         boolean running = runController.isRunning();
         runButton.setEnabled(!running);
@@ -208,29 +230,57 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     }
 
     private void markGuiModified() {
-        if (updatingCurrentNode) {
+        if (updatingCurrentNode || suppressedGuiDirtyEvents > 0) {
+            JMeterActionTrace.info("editor.gui.dirty.suppressed",
+                    "updating=" + updatingCurrentNode + " suppressed=" + suppressedGuiDirtyEvents + " "
+                            + traceState());
             return;
         }
-        updateCurrentJMeterNode();
-        markTreeModified();
+        JMeterActionTrace.info("editor.gui.dirty", traceState());
+        setModified(true);
+    }
+
+    private void flushGuiChanges() {
+        updateCurrentJMeterNode(true);
     }
 
     private void updateCurrentJMeterNode() {
+        updateCurrentJMeterNode(false);
+    }
+
+    private void updateCurrentJMeterNode(boolean rearmGui) {
         try {
             updatingCurrentNode = true;
             GuiPackage guiPackage = GuiPackage.getInstance();
             if (guiPackage == null || model == null || tree == null) {
+                JMeterActionTrace.info("editor.gui.flush.skipped", traceState());
                 return;
             }
+            JMeterActionTrace.info("editor.gui.flush.start", traceState());
             guiPackage.updateCurrentNode();
             JMeterTreeNode currentNode = guiPackage.getCurrentNode();
             if (currentNode != null) {
                 model.nodeChanged(currentNode);
                 tree.repaint();
             }
+            if (rearmGui) {
+                suppressDelayedGuiDirty();
+                elementPanel.showSelected();
+            }
+            JMeterActionTrace.info("editor.gui.flush.done", traceState());
         } finally {
             updatingCurrentNode = false;
         }
+    }
+
+    private void suppressDelayedGuiDirty() {
+        suppressedGuiDirtyEvents++;
+        SwingUtilities.invokeLater(() -> {
+            if (suppressedGuiDirtyEvents > 0) {
+                suppressedGuiDirtyEvents--;
+            }
+            JMeterActionTrace.info("editor.gui.dirty.suppression.done", traceState());
+        });
     }
 
     private void setModified(boolean modified) {
@@ -238,11 +288,24 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         this.modified = modified;
         saveButton.setEnabled(modified);
         propertyChangeSupport.firePropertyChange(FileEditor.PROP_MODIFIED, oldValue, modified);
+        if (oldValue != modified) {
+            JMeterActionTrace.info("editor.modified",
+                    "old=" + oldValue + " new=" + modified + " " + traceState());
+        }
     }
 
     private void markTreeModified() {
+        JMeterActionTrace.info("editor.tree.dirty", traceState());
         undoSupport.record(model);
+        refreshResultTabs();
         setModified(true);
+    }
+
+    private void refreshResultTabs() {
+        if (model == null) {
+            return;
+        }
+        resultsWorkspace.updateNativeResultViews(resultsPanel.availableNativeResultViews(model));
     }
 
     private void showLoadError(Exception exception) {
@@ -253,37 +316,42 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     }
 
     @Override public @NotNull JComponent getComponent() { return component; }
-    @Override public @Nullable JComponent getPreferredFocusedComponent() { return component; }
+    @Override public @Nullable JComponent getPreferredFocusedComponent() { return null; }
     @Override public @Nls(capitalization = Nls.Capitalization.Title) @NotNull String getName() { return "JMeter"; }
     @Override public @NotNull VirtualFile getFile() { return file; }
     @Override public void setState(@NotNull FileEditorState state) { }
     @Override public @NotNull FileEditorState getState(@NotNull FileEditorStateLevel level) { return FileEditorState.INSTANCE; }
     @Override public boolean isModified() { return modified; }
     @Override public boolean isValid() { return file.isValid(); }
-    @Override
-    public void selectNotify() {
-        if (!modified) {
-            load();
-        }
-    }
+    @Override public void selectNotify() { }
 
     @Override public void deselectNotify() { }
 
     @Override
-    public void addPropertyChangeListener(@NotNull PropertyChangeListener listener) {
-        propertyChangeSupport.addPropertyChangeListener(listener);
-    }
+    public void addPropertyChangeListener(@NotNull PropertyChangeListener listener) { propertyChangeSupport.addPropertyChangeListener(listener); }
 
     @Override
-    public void removePropertyChangeListener(@NotNull PropertyChangeListener listener) {
-        propertyChangeSupport.removePropertyChangeListener(listener);
-    }
+    public void removePropertyChangeListener(@NotNull PropertyChangeListener listener) { propertyChangeSupport.removePropertyChangeListener(listener); }
 
     @Override public @Nullable FileEditorLocation getCurrentLocation() { return null; }
 
-    @Override public <T> @Nullable T getUserData(@NotNull Key<T> key) { return null; }
+    @Override public <T> @Nullable T getUserData(@NotNull Key<T> key) { return userData.getUserData(key); }
 
-    @Override public <T> void putUserData(@NotNull Key<T> key, @Nullable T value) { }
+    @Override public <T> void putUserData(@NotNull Key<T> key, @Nullable T value) { userData.putUserData(key, value); }
 
-    @Override public void dispose() { }
+    @Override
+    public void dispose() {
+        if (disposed) {
+            return;
+        }
+        JMeterActionTrace.info("editor.dispose", traceState());
+        disposed = true;
+        runController.exitEngines();
+        Disposer.dispose(editorDisposable);
+    }
+
+    private String traceState() {
+        return "file=" + JMeterActionTrace.file(file) + " node=" + JMeterActionTrace.currentNode()
+                + " modified=" + modified;
+    }
 }

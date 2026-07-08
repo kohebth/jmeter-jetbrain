@@ -81,14 +81,22 @@ final class JMeterPluginClasspath {
     }
 
     static Class<?> loadClass(String className) throws ClassNotFoundException {
+        return loadClass(className, true);
+    }
+
+    static Class<?> loadClassLazy(String className) throws ClassNotFoundException {
+        return loadClass(className, false);
+    }
+
+    private static Class<?> loadClass(String className, boolean initialize) throws ClassNotFoundException {
         ClassLoader classLoader = activeClassLoader();
         if (classLoader != null) {
             try {
-                return Class.forName(className, true, classLoader);
+                return Class.forName(className, initialize, classLoader);
             } catch (ClassNotFoundException ignored) {
             }
         }
-        return Class.forName(className);
+        return Class.forName(className, initialize, JMeterPluginClasspath.class.getClassLoader());
     }
 
     static void activate() {

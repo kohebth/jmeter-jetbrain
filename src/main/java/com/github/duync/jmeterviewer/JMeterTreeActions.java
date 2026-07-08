@@ -55,6 +55,20 @@ final class JMeterTreeActions {
         tree.scrollPathToVisible(path);
     }
 
+    void selectAllVisible() {
+        if (tree == null || tree.getRowCount() == 0) {
+            return;
+        }
+        java.util.List<TreePath> paths = new ArrayList<>();
+        for (int row = 0; row < tree.getRowCount(); row++) {
+            TreePath path = tree.getPathForRow(row);
+            if (path != null) {
+                paths.add(path);
+            }
+        }
+        tree.setSelectionPaths(paths.toArray(new TreePath[0]));
+    }
+
     void addPaletteItem(JMeterPaletteItem item) {
         JMeterTreeNode added = JMeterTreeOperations.add(model, selectedNode(), item);
         if (added != null) {

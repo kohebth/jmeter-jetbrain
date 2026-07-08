@@ -39,6 +39,16 @@ final class JMeterNativeResultViews {
         }
     }
 
+    EnumSet<JMeterNativeResultView> availableViews(JMeterTreeModel model) {
+        EnumSet<JMeterNativeResultView> available = EnumSet.noneOf(JMeterNativeResultView.class);
+        for (JMeterNativeResultView view : JMeterNativeResultView.values()) {
+            if (JMeterViewResultsTreeLocator.find(model, view.guiClasses()) != null) {
+                available.add(view);
+            }
+        }
+        return available;
+    }
+
     JMeterNativeResultView matchingView(TestElement element) {
         for (JMeterNativeResultView view : JMeterNativeResultView.values()) {
             if (JMeterViewResultsTreeLocator.hasGuiClass(element, view.guiClasses())) {

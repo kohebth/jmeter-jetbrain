@@ -31,7 +31,7 @@ public final class JMeterFileEditorProvider implements FileEditorProvider, DumbA
 
     @Override
     public @NotNull FileEditorPolicy getPolicy() {
-        return FileEditorPolicy.HIDE_DEFAULT_EDITOR;
+        return FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR;
     }
 
     @Override

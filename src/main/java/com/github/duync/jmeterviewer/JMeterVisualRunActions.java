@@ -66,15 +66,21 @@ final class JMeterVisualRunActions {
 
         updateCurrentNode.run();
         resultsPanel.configureNativeResultViews(currentModel);
+        resultsWorkspace.updateNativeResultViews(resultsPanel.availableNativeResultViews(currentModel));
         resultsPanel.clear();
         threadGroupActivity.prepare(currentModel);
-        threadGroupActivity.start();
+        JMeterTreeNode selectedNode = selectedTreeNode();
+        if (selectedThreadGroupOnly) {
+            threadGroupActivity.startSelected(selectedNode);
+        } else {
+            threadGroupActivity.start();
+        }
         resultsPanel.appendDiagnostic("Starting test");
         resultsPanel.runStarted();
         resultsWorkspace.showViewResultsTree();
         runStatus.accept("Starting");
         if (selectedThreadGroupOnly) {
-            runController.startSelectedThreadGroup(currentModel, selectedTreeNode(), runOptions, target);
+            runController.startSelectedThreadGroup(currentModel, selectedNode, runOptions, target);
         } else {
             runController.start(currentModel, runOptions, target);
         }

@@ -27,6 +27,7 @@ final class JMeterRunController {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final java.util.List<JMeterEngine> engines = new ArrayList<>();
     private volatile JMeterRunLifecycle lifecycle;
+    private volatile JMeterGuiPackageScope guiPackageScope;
 
     JMeterRunController(Listener listener) {
         this.listener = listener;
@@ -53,10 +54,12 @@ final class JMeterRunController {
 
     private void start(HashTree testTree, JMeterRunOptions options, RunTarget target) {
         if (!running.compareAndSet(false, true)) {
+            JMeterActionTrace.info("run.start.ignored", "reason=already-running");
             return;
         }
 
         try {
+            JMeterActionTrace.info("run.start.request", "target=" + (target == null ? RunTarget.AUTO : target));
             JMeterPluginClasspath.activate();
             GuiPackage guiPackage = GuiPackage.getInstance();
             if (guiPackage != null) {
@@ -72,6 +75,7 @@ final class JMeterRunController {
             if (engines.isEmpty()) {
                 running.set(false);
                 notifyStatus("Idle");
+                JMeterActionTrace.info("run.start.no-engines");
                 SwingUtilities.invokeLater(() -> listener.log("No JMeter engines configured"));
                 return;
             }
@@ -87,11 +91,15 @@ final class JMeterRunController {
                 engine.configure(testTree);
             }
             notifyStatus("Starting " + (target == null ? RunTarget.AUTO : target).label());
+            guiPackageScope = JMeterGuiPackageScope.detach();
             for (JMeterEngine engine : engines) {
                 engine.runTest();
             }
+            JMeterActionTrace.info("run.start.dispatched", "engines=" + engines.size());
             monitorEngines(lifecycle, new ArrayList<>(engines));
         } catch (Exception exception) {
+            JMeterActionTrace.warn("run.start.failed", exception);
+            restoreGuiPackage();
             running.set(false);
             lifecycle = null;
             notifyStatus("Run failed: " + exception.getMessage());
@@ -100,16 +108,19 @@ final class JMeterRunController {
     }
 
     void stop() {
+        JMeterActionTrace.info("run.stop.request", "running=" + running.get());
         if (running.get()) {
             stopAll(true, "Stopping");
             JMeterRunLifecycle current = lifecycle;
             if (current != null) {
+                restoreGuiPackage();
                 current.forceFinish("Stopped", "Stop requested");
             }
         }
     }
 
     void shutdown() {
+        JMeterActionTrace.info("run.shutdown.request", "running=" + running.get());
         if (!running.get()) {
             return;
         }
@@ -124,6 +135,7 @@ final class JMeterRunController {
     }
 
     void stopThread(String threadName, boolean now) {
+        JMeterActionTrace.info("run.thread.stop.request", "thread=\"" + threadName + "\" now=" + now);
         if (threadName == null || threadName.trim().isEmpty()) {
             return;
         }
@@ -134,6 +146,7 @@ final class JMeterRunController {
     }
 
     void resetEngines() {
+        JMeterActionTrace.info("run.engines.reset", "engines=" + engines.size());
         for (JMeterEngine engine : engines) {
             engine.reset();
         }
@@ -141,12 +154,14 @@ final class JMeterRunController {
     }
 
     void exitEngines() {
+        JMeterActionTrace.info("run.engines.exit", "engines=" + engines.size());
         for (JMeterEngine engine : engines) {
             engine.exit();
         }
         engines.clear();
         running.set(false);
         lifecycle = null;
+        restoreGuiPackage();
         notifyStatus("Idle");
         SwingUtilities.invokeLater(() -> listener.log("Exited JMeter engines"));
     }
@@ -190,6 +205,8 @@ final class JMeterRunController {
                 for (JMeterEngine engine : monitoredEngines) {
                     String failure = completedFailure(engine);
                     if (failure != null) {
+                        JMeterActionTrace.info("run.monitor.failed", failure);
+                        restoreGuiPackage();
                         lifecycle.forceFinish("Run failed", failure);
                         return;
                     }
@@ -200,11 +217,15 @@ final class JMeterRunController {
                 }
                 sawActive |= anyActive;
                 if (!anyActive && (sawActive || System.currentTimeMillis() - started > 1000L)) {
+                    JMeterActionTrace.info("run.monitor.finished",
+                            "sawActive=" + sawActive + " elapsedMs=" + (System.currentTimeMillis() - started));
+                    restoreGuiPackage();
                     lifecycle.forceFinish("Finished", "All JMeter engines are idle");
                     return;
                 }
                 sleep();
             }
+            restoreGuiPackage();
         };
         Application application = ApplicationManager.getApplication();
         if (application != null) {
@@ -231,6 +252,14 @@ final class JMeterRunController {
         } catch (ExecutionException exception) {
             Throwable cause = exception.getCause() == null ? exception : exception.getCause();
             return "Run failed: " + cause.getMessage();
+        }
+    }
+
+    private void restoreGuiPackage() {
+        JMeterGuiPackageScope scope = guiPackageScope;
+        if (scope != null) {
+            guiPackageScope = null;
+            scope.close();
         }
     }
 

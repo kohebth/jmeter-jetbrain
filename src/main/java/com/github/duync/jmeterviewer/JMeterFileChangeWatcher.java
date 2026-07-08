@@ -7,25 +7,23 @@ import com.intellij.openapi.vfs.VirtualFileEvent;
 import com.intellij.openapi.vfs.VirtualFileListener;
 import com.intellij.openapi.vfs.VirtualFilePropertyEvent;
 
-import java.util.function.BooleanSupplier;
-
 final class JMeterFileChangeWatcher {
     private JMeterFileChangeWatcher() {
     }
 
-    static void install(VirtualFile file, Disposable parent, BooleanSupplier modified, Runnable reload) {
+    static void install(VirtualFile file, Disposable parent, Runnable contentsChanged, Runnable renamed) {
         file.getFileSystem().addVirtualFileListener(new VirtualFileListener() {
             @Override
             public void contentsChanged(VirtualFileEvent event) {
-                if (file.equals(event.getFile()) && !modified.getAsBoolean()) {
-                    ApplicationManager.getApplication().invokeLater(reload);
+                if (file.equals(event.getFile())) {
+                    ApplicationManager.getApplication().invokeLater(contentsChanged);
                 }
             }
 
             @Override
             public void propertyChanged(VirtualFilePropertyEvent event) {
                 if (file.equals(event.getFile()) && VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
-                    ApplicationManager.getApplication().invokeLater(reload);
+                    ApplicationManager.getApplication().invokeLater(renamed);
                 }
             }
         }, parent);

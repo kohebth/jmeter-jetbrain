@@ -71,8 +71,7 @@ final class JMeterAdvancedRunOptions {
         filePanel.add(userPropertiesFile, BorderLayout.CENTER);
         filePanel.add(browse, BorderLayout.EAST);
 
-        JTabbedPane tabs = new JTabbedPane();
-        JMeterTabOverflowSupport.apply(tabs);
+        JTabbedPane tabs = JMeterTabOverflowSupport.createTabbedPane();
         tabs.addTab("JMeter Properties", new JScrollPane(jmeterProperties));
         tabs.addTab("System Properties", new JScrollPane(systemProperties));
         panel.add(filePanel, BorderLayout.NORTH);

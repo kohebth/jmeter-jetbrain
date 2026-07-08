@@ -11,8 +11,7 @@ final class JMeterLeftPanel {
     }
 
     static JComponent create(Project project) {
-        JTabbedPane tabs = new JTabbedPane();
-        JMeterTabOverflowSupport.apply(tabs);
+        JTabbedPane tabs = JMeterTabOverflowSupport.createTabbedPane();
         addLazyTab(tabs, "Elements", JMeterPalettePanel::create);
         addLazyTab(tabs, "Functions", JMeterFunctionPanel::create);
         addLazyTab(tabs, "Properties", () -> JMeterPropertiesPanel.create(project));
