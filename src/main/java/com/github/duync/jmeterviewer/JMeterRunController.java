@@ -3,15 +3,23 @@ package com.github.duync.jmeterviewer;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.Application;
 import org.apache.jmeter.engine.*;
+import org.apache.jmeter.engine.util.NoThreadClone;
 import org.apache.jmeter.gui.GuiPackage;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
+import org.apache.jmeter.gui.tree.JMeterTreeNode;
 import org.apache.jmeter.reporters.ResultCollector;
 import org.apache.jmeter.samplers.SampleEvent;
+import org.apache.jmeter.samplers.SampleListener;
 import org.apache.jmeter.samplers.SampleResult;
+import org.apache.jmeter.testelement.AbstractTestElement;
+import org.apache.jmeter.testelement.TestStateListener;
 import org.apache.jorphan.collections.HashTree;
 
 import javax.swing.SwingUtilities;
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class JMeterRunController {
@@ -33,6 +41,17 @@ final class JMeterRunController {
     }
 
     void start(JMeterTreeModel model, JMeterRunOptions options, RunTarget target) {
+        start(JMeterRunTreeBuilder.fullPlan(model), options, target);
+    }
+
+    void startSelectedThreadGroup(JMeterTreeModel model,
+                                  JMeterTreeNode selected,
+                                  JMeterRunOptions options,
+                                  RunTarget target) {
+        start(JMeterRunTreeBuilder.selectedThreadGroup(model, selected), options, target);
+    }
+
+    private void start(HashTree testTree, JMeterRunOptions options, RunTarget target) {
         if (!running.compareAndSet(false, true)) {
             return;
         }
@@ -47,7 +66,6 @@ final class JMeterRunController {
                 options.apply();
             }
 
-            HashTree testTree = JMeterTreeLoader.toRunHashTree(model);
             JMeterRunTreePreparer.prepare(testTree);
             engines.clear();
             engines.addAll(createEngines(options, target));
@@ -58,11 +76,13 @@ final class JMeterRunController {
                 return;
             }
             lifecycle = new JMeterRunLifecycle(listener, running, engines.size());
-            EditorResultCollector collector = new EditorResultCollector(listener, lifecycle);
-            if (options != null && options.resultFile() != null) {
-                collector.setFilename(options.resultFile());
-            }
+            EditorRunListener collector = new EditorRunListener(listener, lifecycle);
             JMeterRunListenerAttacher.attach(testTree, collector);
+            if (options != null && options.resultFile() != null) {
+                ResultCollector fileCollector = new ResultCollector();
+                fileCollector.setFilename(options.resultFile());
+                JMeterRunListenerAttacher.attach(testTree, fileCollector);
+            }
             for (JMeterEngine engine : engines) {
                 engine.configure(testTree);
             }
@@ -168,6 +188,11 @@ final class JMeterRunController {
             while (running.get() && lifecycle == this.lifecycle) {
                 boolean anyActive = false;
                 for (JMeterEngine engine : monitoredEngines) {
+                    String failure = completedFailure(engine);
+                    if (failure != null) {
+                        lifecycle.forceFinish("Run failed", failure);
+                        return;
+                    }
                     try {
                         anyActive |= engine.isActive();
                     } catch (RuntimeException ignored) {
@@ -189,6 +214,24 @@ final class JMeterRunController {
         Thread thread = new Thread(monitor, "JMeter run monitor");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private String completedFailure(JMeterEngine engine) {
+        if (!(engine instanceof StandardJMeterEngine)) {
+            return null;
+        }
+        try {
+            ((StandardJMeterEngine) engine).awaitTermination(Duration.ofMillis(1));
+            return null;
+        } catch (TimeoutException ignored) {
+            return null;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return "Run monitor interrupted";
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            return "Run failed: " + cause.getMessage();
+        }
     }
 
     private void sleep() {
@@ -240,13 +283,15 @@ final class JMeterRunController {
         }
     }
 
-    private static final class EditorResultCollector extends ResultCollector {
+    private static final class EditorRunListener extends AbstractTestElement
+            implements SampleListener, TestStateListener, NoThreadClone {
         private final Listener listener;
         private final JMeterRunLifecycle lifecycle;
 
-        private EditorResultCollector(Listener listener, JMeterRunLifecycle lifecycle) {
+        private EditorRunListener(Listener listener, JMeterRunLifecycle lifecycle) {
             this.listener = listener;
             this.lifecycle = lifecycle;
+            setName("IDE Results");
         }
 
         @Override
@@ -273,6 +318,14 @@ final class JMeterRunController {
         public void sampleOccurred(SampleEvent event) {
             SampleResult result = event.getResult();
             SwingUtilities.invokeLater(() -> listener.sampleOccurred(result));
+        }
+
+        @Override
+        public void sampleStarted(SampleEvent event) {
+        }
+
+        @Override
+        public void sampleStopped(SampleEvent event) {
         }
     }
 }

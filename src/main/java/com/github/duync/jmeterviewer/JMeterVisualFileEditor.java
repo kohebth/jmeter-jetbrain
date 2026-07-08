@@ -11,16 +11,13 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBScrollPane;
 import org.apache.jmeter.gui.GuiPackage;
-import org.apache.jmeter.gui.tree.JMeterTreeListener;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.gui.tree.JMeterTreeNode;
-import org.apache.jmeter.testelement.TestElement;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.tree.TreePath;
 import java.awt.BorderLayout;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
@@ -36,6 +33,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     private final JButton saveButton;
     private final JButton reloadButton;
     private final JButton runButton;
+    private final JButton runSelectedButton;
     private final JButton runLocalButton;
     private final JButton runRemoteButton;
     private final JButton runAllButton;
@@ -57,6 +55,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     private final JMeterThreadGroupActivity threadGroupActivity;
     private final JMeterSourcePanel sourcePanel;
     private final JMeterRunController runController;
+    private final JMeterVisualRunActions runActions;
     private final JMeterIdeUndoSupport undoSupport;
     private JMeterTreeModel model;
     private JTree tree;
@@ -74,10 +73,11 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         this.propertyChangeSupport = new PropertyChangeSupport(this);
         this.saveButton = new JButton("Save");
         this.reloadButton = new JButton("Reload");
-        this.runButton = new JButton("Run");
-        this.runLocalButton = new JButton("Run Local");
-        this.runRemoteButton = new JButton("Run Remote");
-        this.runAllButton = new JButton("Run All");
+        this.runButton = new JButton("Run Plan");
+        this.runSelectedButton = new JButton("Run Thread Group");
+        this.runLocalButton = new JButton("Run Local Plan");
+        this.runRemoteButton = new JButton("Run Remote Plan");
+        this.runAllButton = new JButton("Run Local+Remote");
         this.stopButton = new JButton("Stop");
         this.shutdownButton = new JButton("Shutdown");
         this.resetEnginesButton = new JButton("Reset Engines");
@@ -94,11 +94,14 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         this.threadGroupActivity = new JMeterThreadGroupActivity();
         this.runController = new JMeterRunController(
                 new JMeterEditorRunListener(this::setRunStatus, resultsPanel, threadGroupActivity));
+        this.runActions = new JMeterVisualRunActions(() -> model, () -> tree, this::updateCurrentJMeterNode,
+                resultsWorkspace, resultsPanel, threadGroupActivity, runController, runOptions, this::setRunStatus);
         this.threadControl = new JMeterThreadControlPanel(runController);
         this.sourcePanel = new JMeterSourcePanel(project, file, this::load,
                 this::updateCurrentJMeterNode, () -> model, this);
         this.undoSupport = new JMeterIdeUndoSupport(project, file, this::restoreModel);
-        this.toolbarState = new JMeterEditorToolbarState(saveButton, reloadButton, runButton, runLocalButton,
+        this.toolbarState = new JMeterEditorToolbarState(saveButton, reloadButton, runButton, runSelectedButton,
+                runLocalButton,
                 runRemoteButton, runAllButton, stopButton,
                 shutdownButton, resetEnginesButton, exitEnginesButton, runStatusLabel, resultFileLoader,
                 exportActions, reportAction, validationAction, statsAction, runOptions, threadControl, resultsPanel);
@@ -108,6 +111,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
                 saveButton,
                 reloadButton,
                 runButton,
+                runSelectedButton,
                 runLocalButton,
                 runRemoteButton,
                 runAllButton,
@@ -117,10 +121,11 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
                 exitEnginesButton,
                 this::save,
                 this::reloadFromFile,
-                this::runTest,
-                () -> runTest(JMeterRunController.RunTarget.LOCAL),
-                () -> runTest(JMeterRunController.RunTarget.REMOTE),
-                () -> runTest(JMeterRunController.RunTarget.LOCAL_AND_REMOTE),
+                runActions::runAuto,
+                runActions::runSelectedThreadGroup,
+                runActions::runLocal,
+                runActions::runRemote,
+                runActions::runLocalAndRemote,
                 runController,
                 validationAction,
                 this::showCommands
@@ -143,7 +148,6 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
             undoSupport.reset(model);
             installModel();
             setModified(false);
-            selectInitialNode();
         } catch (Exception exception) {
             JMeterIdeNotifications.error(project, "Unable to load JMX: " + exception.getMessage());
             showLoadError(exception);
@@ -151,37 +155,12 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     }
 
     private void installModel() {
-        JMeterTreeActions treeActions = new JMeterTreeActions(model, this::markTreeModified);
-
-        JMeterTreeListener listener = new JMeterTreeListener(model);
-        listener.setActionHandler(event -> showSelectedElement());
-        GuiPackage.initInstance(listener, model);
-
-        threadGroupActivity.setChangeListener(() -> {
-            if (tree != null) {
-                tree.repaint();
-            }
-        });
-        threadGroupActivity.clear();
-        tree = JMeterTreeView.create(model, listener, treeActions, threadGroupActivity, this::markTreeModified);
-        JMeterTreeFileActions fileActions = new JMeterTreeFileActions(project, model,
-                treeActions::selectedNode, treeActions::selectNode, this::markTreeModified);
-        JMeterAddElementDialog addDialog = new JMeterAddElementDialog(project, treeActions);
-        templateDialog = new JMeterTemplateDialog(project, treeActions);
-        JMeterSearchController search = new JMeterSearchController(
-                project,
-                () -> model,
-                () -> tree,
-                treeActions::selectNode,
-                this::markTreeModified
-        );
-        commandPalette = new JMeterCommandPalette(project, treeActions, fileActions, addDialog, templateDialog, search);
-
-        component.removeAll();
-        component.add(JMeterToolbarFactory.create(project, () -> model, toolbarState,
-                treeActions, fileActions, addDialog, templateDialog, commandPalette, search), BorderLayout.NORTH);
-        sourcePanel.refresh();
-        component.add(JMeterEditorBody.create(tree, elementPanel.component(), sourcePanel), BorderLayout.CENTER);
+        JMeterVisualModelInstaller.Installed installed = JMeterVisualModelInstaller.install(
+                project, model, component, toolbarState, elementPanel, sourcePanel, resultsPanel, resultsWorkspace,
+                threadGroupActivity, this::markTreeModified);
+        tree = installed.tree();
+        commandPalette = installed.commandPalette();
+        templateDialog = installed.templateDialog();
     }
 
     void showCommands() { if (commandPalette != null) commandPalette.show(); }
@@ -191,20 +170,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
     private void restoreModel(JMeterTreeModel restoredModel) {
         model = restoredModel;
         installModel();
-        selectInitialNode();
         setModified(true);
-    }
-
-    private void selectInitialNode() {
-        JMeterTreeNode root = (JMeterTreeNode) model.getRoot();
-        if (root.getChildCount() == 0) {
-            return;
-        }
-
-        JMeterTreeNode testPlan = (JMeterTreeNode) root.getChildAt(0);
-        TreePath path = new TreePath(testPlan.getPath());
-        tree.expandPath(path);
-        tree.setSelectionPath(path);
     }
 
     void save() {
@@ -223,47 +189,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         }
     }
 
-    void runTest() {
-        runTest(JMeterRunController.RunTarget.AUTO);
-    }
-
-    private void runTest(JMeterRunController.RunTarget target) {
-        if (model == null || runController.isRunning()) {
-            return;
-        }
-        updateCurrentJMeterNode();
-        resultsPanel.configureNativeResultViews(model);
-        resultsPanel.clear();
-        threadGroupActivity.prepare(model);
-        threadGroupActivity.start();
-        resultsPanel.appendDiagnostic("Starting test");
-        resultsPanel.runStarted();
-        resultsWorkspace.showViewResultsTree();
-        setRunStatus("Starting");
-        runController.start(model, runOptions, target);
-    }
-
-    private void showSelectedElement() {
-        elementPanel.showSelected();
-        TestElement selected = selectedElement();
-        JMeterNativeResultView view = resultsPanel.nativeViewFor(selected);
-        if (view != null) {
-            resultsPanel.configureNativeResultView(view, selected);
-            resultsWorkspace.showNativeView(view);
-        }
-    }
-
-    private TestElement selectedElement() {
-        GuiPackage guiPackage = GuiPackage.getInstance();
-        if (guiPackage == null || guiPackage.getCurrentNode() == null) {
-            return null;
-        }
-        Object object = guiPackage.getCurrentNode().getUserObject();
-        if (!(object instanceof TestElement)) {
-            return null;
-        }
-        return (TestElement) object;
-    }
+    void runTest() { runActions.runAuto(); }
 
     void stopTest() { runController.stop(); }
 
@@ -273,6 +199,7 @@ public final class JMeterVisualFileEditor implements FileEditor, Disposable {
         runStatusLabel.setText(status);
         boolean running = runController.isRunning();
         runButton.setEnabled(!running);
+        runSelectedButton.setEnabled(!running);
         runLocalButton.setEnabled(!running);
         runRemoteButton.setEnabled(!running);
         runAllButton.setEnabled(!running);

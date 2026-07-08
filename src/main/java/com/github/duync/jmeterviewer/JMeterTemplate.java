@@ -7,20 +7,36 @@ final class JMeterTemplate {
     private final String description;
     private final java.util.List<Node> roots;
     private final boolean custom;
+    private final org.apache.jmeter.gui.action.template.Template nativeTemplate;
 
     private JMeterTemplate(String name, String description, Node... roots) {
-        this(name, description, false, Arrays.asList(roots));
+        this(name, description, false, null, Arrays.asList(roots));
     }
 
-    private JMeterTemplate(String name, String description, boolean custom, java.util.List<Node> roots) {
+    private JMeterTemplate(String name,
+                           String description,
+                           boolean custom,
+                           org.apache.jmeter.gui.action.template.Template nativeTemplate,
+                           java.util.List<Node> roots) {
         this.name = name;
         this.description = description;
         this.custom = custom;
+        this.nativeTemplate = nativeTemplate;
         this.roots = roots;
     }
 
     static JMeterTemplate custom(String name, String description, java.util.List<Node> roots) {
-        return new JMeterTemplate(name, description, true, roots);
+        return new JMeterTemplate(name, description, true, null, roots);
+    }
+
+    static JMeterTemplate nativeTemplate(org.apache.jmeter.gui.action.template.Template template) {
+        return new JMeterTemplate(
+                "JMeter: " + template.getName(),
+                JMeterNativeTemplateCatalog.description(template),
+                false,
+                template,
+                Collections.emptyList()
+        );
     }
 
     static java.util.List<JMeterTemplate> defaults() {
@@ -152,6 +168,14 @@ final class JMeterTemplate {
 
     boolean custom() {
         return custom;
+    }
+
+    boolean nativeTemplate() {
+        return nativeTemplate != null;
+    }
+
+    org.apache.jmeter.gui.action.template.Template nativeDefinition() {
+        return nativeTemplate;
     }
 
     String name() {

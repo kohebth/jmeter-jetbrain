@@ -1,11 +1,12 @@
 package com.github.duync.jmeterviewer;
 
 import org.apache.jmeter.gui.JMeterGUIComponent;
+import org.apache.jmeter.gui.util.MenuInfo;
 import org.apache.jmeter.gui.util.MenuFactory;
-import org.apache.jmeter.util.JMeterUtils;
-import org.apache.jorphan.reflect.ClassFinder;
+import org.apache.jmeter.testbeans.TestBean;
+import org.apache.jmeter.testelement.TestElement;
 
-import java.io.File;
+import java.lang.reflect.Method;
 import java.util.*;
 
 final class JMeterPaletteDiscovery {
@@ -14,45 +15,110 @@ final class JMeterPaletteDiscovery {
 
     static List<JMeterPaletteItem> discover() {
         List<JMeterPaletteItem> items = new ArrayList<>();
-        for (String className : guiClassNames()) {
-            JMeterPaletteItem item = itemFor(className);
-            if (item != null) {
-                items.add(item);
+        try {
+            EmbeddedJMeterRuntime.ensureReady();
+        } catch (Exception exception) {
+            return items;
+        }
+        ClassLoader previous = JMeterPluginClasspath.activateThread();
+        try {
+            for (Map.Entry<String, List<MenuInfo>> entry : menuMap().entrySet()) {
+                JMeterPaletteItem.Kind kind = kindFor(entry.getKey());
+                if (kind == null) {
+                    continue;
+                }
+                for (MenuInfo info : entry.getValue()) {
+                    JMeterPaletteItem item = itemFor(info, kind);
+                    if (item != null) {
+                        items.add(item);
+                    }
+                }
             }
+            if (items.isEmpty()) {
+                items.addAll(scanSearchPaths());
+            }
+        } finally {
+            JMeterPluginClasspath.restoreThread(previous);
         }
         items.sort(Comparator.comparing(JMeterPaletteItem::toString));
         return items;
     }
 
-    @SuppressWarnings("deprecation")
-    private static List<String> guiClassNames() {
+    @SuppressWarnings("unchecked")
+    private static Map<String, List<MenuInfo>> menuMap() {
         try {
-            return ClassFinder.findClassesThatExtend(
-                    searchPaths(),
-                    new Class<?>[]{JMeterGUIComponent.class},
-                    false
-            );
-        } catch (Exception exception) {
-            return Collections.emptyList();
+            Method method = MenuFactory.class.getDeclaredMethod("getMenuMap");
+            method.setAccessible(true);
+            return (Map<String, List<MenuInfo>>) method.invoke(null);
+        } catch (Throwable exception) {
+            return Collections.emptyMap();
         }
     }
 
-    private static String[] searchPaths() {
-        LinkedHashSet<String> paths = new LinkedHashSet<>(Arrays.asList(JMeterUtils.getSearchPaths()));
-        String classPath = System.getProperty("java.class.path", "");
-        if (!classPath.isEmpty()) {
-            paths.addAll(Arrays.asList(classPath.split(File.pathSeparator)));
+    private static List<JMeterPaletteItem> scanSearchPaths() {
+        List<JMeterPaletteItem> items = new ArrayList<>();
+        for (String className : JMeterPaletteClassScanner.classNames()) {
+            if (isAddableClass(className)) {
+                JMeterPaletteItem item = itemFor(className);
+                if (item != null) {
+                    items.add(item);
+                }
+            }
         }
-        paths.addAll(Arrays.asList(JMeterPluginClasspath.searchPaths()));
-        paths.removeIf(String::isEmpty);
-        return paths.toArray(new String[0]);
+        return items;
+    }
+
+    private static boolean isAddableClass(String className) {
+        try {
+            Class<?> type = JMeterPluginClasspath.loadClass(className);
+            return JMeterGUIComponent.class.isAssignableFrom(type) || TestBean.class.isAssignableFrom(type);
+        } catch (Exception | LinkageError ignored) {
+            return false;
+        }
+    }
+
+
+    private static JMeterPaletteItem itemFor(MenuInfo info, JMeterPaletteItem.Kind kind) {
+        try {
+            String className = info.getClassName();
+            Class<?> componentClass = JMeterPluginClasspath.loadClass(className);
+            if (TestBean.class.isAssignableFrom(componentClass)) {
+                return JMeterPaletteItem.discovered(
+                        info.getLabel(), kind,
+                        "org.apache.jmeter.testbeans.gui.TestBeanGUI",
+                        className);
+            }
+            if (!JMeterGUIComponent.class.isAssignableFrom(componentClass)) {
+                return null;
+            }
+            JMeterGUIComponent gui = (JMeterGUIComponent) componentClass.getDeclaredConstructor().newInstance();
+            if (!gui.canBeAdded()) {
+                return null;
+            }
+            TestElement element = gui.createTestElement();
+            String testClass = element == null ? null : element.getClass().getName();
+            return JMeterPaletteItem.discovered(info.getLabel(), kind, className, testClass);
+        } catch (Exception | LinkageError error) {
+            return null;
+        }
     }
 
     private static JMeterPaletteItem itemFor(String className) {
         try {
-            JMeterGUIComponent gui = (JMeterGUIComponent) JMeterPluginClasspath.loadClass(className)
-                    .getDeclaredConstructor()
-                    .newInstance();
+            Class<?> componentClass = JMeterPluginClasspath.loadClass(className);
+            if (TestBean.class.isAssignableFrom(componentClass)) {
+                JMeterPaletteItem.Kind kind = kindForTestElement(componentClass);
+                if (kind == null) {
+                    return null;
+                }
+                return JMeterPaletteItem.discovered(
+                        labelForTestBean(componentClass), kind,
+                        "org.apache.jmeter.testbeans.gui.TestBeanGUI", className);
+            }
+            if (!JMeterGUIComponent.class.isAssignableFrom(componentClass)) {
+                return null;
+            }
+            JMeterGUIComponent gui = (JMeterGUIComponent) componentClass.getDeclaredConstructor().newInstance();
             if (!gui.canBeAdded()) {
                 return null;
             }
@@ -60,47 +126,93 @@ final class JMeterPaletteDiscovery {
             if (kind == null) {
                 return null;
             }
-            return JMeterPaletteItem.discovered(gui.getStaticLabel(), kind, className);
+            TestElement element = gui.createTestElement();
+            String testClass = element == null ? null : element.getClass().getName();
+            return JMeterPaletteItem.discovered(gui.getStaticLabel(), kind, className, testClass);
         } catch (Exception | LinkageError error) {
             return null;
         }
+    }
+
+    private static String labelForTestBean(Class<?> componentClass) {
+        try {
+            return new org.apache.jmeter.testbeans.gui.TestBeanGUI(componentClass).getStaticLabel();
+        } catch (Exception exception) {
+            return componentClass.getSimpleName();
+        }
+    }
+
+    private static JMeterPaletteItem.Kind kindForTestElement(Class<?> componentClass) {
+        if (org.apache.jmeter.samplers.Sampler.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.SAMPLER;
+        }
+        if (org.apache.jmeter.config.ConfigElement.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.CONFIG;
+        }
+        if (org.apache.jmeter.assertions.Assertion.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.ASSERTION;
+        }
+        if (org.apache.jmeter.timers.Timer.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.TIMER;
+        }
+        if (org.apache.jmeter.processor.PreProcessor.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.PRE_PROCESSOR;
+        }
+        if (org.apache.jmeter.processor.PostProcessor.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.POST_PROCESSOR;
+        }
+        if (org.apache.jmeter.samplers.SampleListener.class.isAssignableFrom(componentClass)
+                || org.apache.jmeter.visualizers.Visualizer.class.isAssignableFrom(componentClass)) {
+            return JMeterPaletteItem.Kind.LISTENER;
+        }
+        return null;
     }
 
     private static JMeterPaletteItem.Kind kindFor(Collection<String> categories) {
         if (categories == null) {
             return null;
         }
-        if (categories.contains(MenuFactory.THREADS)) {
+        for (String category : categories) {
+            JMeterPaletteItem.Kind kind = kindFor(category);
+            if (kind != null) {
+                return kind;
+            }
+        }
+        return null;
+    }
+
+    private static JMeterPaletteItem.Kind kindFor(String category) {
+        if (MenuFactory.THREADS.equals(category)) {
             return JMeterPaletteItem.Kind.THREAD_GROUP;
         }
-        if (categories.contains(MenuFactory.FRAGMENTS)) {
+        if (MenuFactory.FRAGMENTS.equals(category)) {
             return JMeterPaletteItem.Kind.TEST_FRAGMENT;
         }
-        if (categories.contains(MenuFactory.SAMPLERS)) {
+        if (MenuFactory.SAMPLERS.equals(category)) {
             return JMeterPaletteItem.Kind.SAMPLER;
         }
-        if (categories.contains(MenuFactory.CONTROLLERS)) {
+        if (MenuFactory.CONTROLLERS.equals(category)) {
             return JMeterPaletteItem.Kind.CONTROLLER;
         }
-        if (categories.contains(MenuFactory.CONFIG_ELEMENTS)) {
+        if (MenuFactory.CONFIG_ELEMENTS.equals(category)) {
             return JMeterPaletteItem.Kind.CONFIG;
         }
-        if (categories.contains(MenuFactory.ASSERTIONS)) {
+        if (MenuFactory.ASSERTIONS.equals(category)) {
             return JMeterPaletteItem.Kind.ASSERTION;
         }
-        if (categories.contains(MenuFactory.TIMERS)) {
+        if (MenuFactory.TIMERS.equals(category)) {
             return JMeterPaletteItem.Kind.TIMER;
         }
-        if (categories.contains(MenuFactory.PRE_PROCESSORS)) {
+        if (MenuFactory.PRE_PROCESSORS.equals(category)) {
             return JMeterPaletteItem.Kind.PRE_PROCESSOR;
         }
-        if (categories.contains(MenuFactory.POST_PROCESSORS)) {
+        if (MenuFactory.POST_PROCESSORS.equals(category)) {
             return JMeterPaletteItem.Kind.POST_PROCESSOR;
         }
-        if (categories.contains(MenuFactory.LISTENERS)) {
+        if (MenuFactory.LISTENERS.equals(category)) {
             return JMeterPaletteItem.Kind.LISTENER;
         }
-        if (categories.contains(MenuFactory.NON_TEST_ELEMENTS)) {
+        if (MenuFactory.NON_TEST_ELEMENTS.equals(category)) {
             return JMeterPaletteItem.Kind.NON_TEST;
         }
         return null;

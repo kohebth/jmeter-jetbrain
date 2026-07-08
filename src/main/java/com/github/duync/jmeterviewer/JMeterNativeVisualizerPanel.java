@@ -71,9 +71,10 @@ final class JMeterNativeVisualizerPanel {
         JMeterGUIComponent createdGui = null;
         JTextArea error = null;
         panel.removeAll();
-        ClassLoader previousLoader = JMeterPluginClasspath.activateThread();
+        ClassLoader previousLoader = Thread.currentThread().getContextClassLoader();
         try {
             EmbeddedJMeterRuntime.ensureReady();
+            previousLoader = JMeterPluginClasspath.activateThread();
             Object instance = JMeterPluginClasspath.loadClass(className).getDeclaredConstructor().newInstance();
             createdVisualizer = instance instanceof Visualizer ? (Visualizer) instance : null;
             createdClearable = instance instanceof Clearable ? (Clearable) instance : null;

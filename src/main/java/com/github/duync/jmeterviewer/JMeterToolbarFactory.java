@@ -24,6 +24,7 @@ final class JMeterToolbarFactory {
                 new JMeterSaveAsAction(project, model).button(),
                 state.reloadButton,
                 state.runButton,
+                state.runSelectedButton,
                 state.runLocalButton,
                 state.runRemoteButton,
                 state.runAllButton,

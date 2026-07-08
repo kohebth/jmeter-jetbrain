@@ -4,6 +4,7 @@ import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.gui.tree.JMeterTreeNode;
 import org.apache.jmeter.save.SaveService;
 import org.apache.jmeter.testelement.TestElement;
+import org.apache.jorphan.collections.HashTree;
 
 import javax.swing.tree.MutableTreeNode;
 import java.io.ByteArrayInputStream;
@@ -42,6 +43,26 @@ final class JMeterTreeOperations {
         }
         for (JMeterTemplate.Node child : template.children()) {
             addTemplate(model, node, child);
+        }
+        return node;
+    }
+
+    static JMeterTreeNode addSubtree(JMeterTreeModel model,
+                                     JMeterTreeNode parent,
+                                     TestElement element,
+                                     HashTree children) {
+        if (parent == null || element == null || !JMeterAddRules.canAddElement(parent, element)) {
+            return null;
+        }
+        JMeterElementMetadata.normalize(element);
+        JMeterTreeNode node = new JMeterTreeNode(element, model);
+        model.insertNodeInto(node, parent, parent.getChildCount());
+        if (children != null) {
+            for (Object child : children.getArray()) {
+                if (child instanceof TestElement) {
+                    addSubtree(model, node, (TestElement) child, children.getTree(child));
+                }
+            }
         }
         return node;
     }

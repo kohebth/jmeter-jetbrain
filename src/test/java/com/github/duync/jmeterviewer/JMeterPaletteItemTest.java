@@ -35,6 +35,22 @@ final class JMeterPaletteItemTest {
     }
 
     @Test
+    void discoversMenuItemsWithUsableTestElements() throws Exception {
+        JMeterPaletteItem mirrorServer = null;
+        java.util.List<JMeterPaletteItem> discovered = JMeterPaletteDiscovery.discover();
+        for (JMeterPaletteItem item : discovered) {
+            if ("HTTP Mirror Server".equals(item.label())) {
+                mirrorServer = item;
+                break;
+            }
+        }
+
+        assertNotNull(mirrorServer, discovered.toString());
+        TestElement element = mirrorServer.createTestElement();
+        assertEquals("org.apache.jmeter.protocol.http.control.HttpMirrorControl", element.getClass().getName());
+    }
+
+    @Test
     void usesUniquePaletteKeysForSharedGuiClasses() {
         long distinctKeys = JMeterPaletteCatalog.items().stream().map(JMeterPaletteItem::key).distinct().count();
         assertEquals(JMeterPaletteCatalog.items().size(), distinctKeys);

@@ -230,8 +230,8 @@ final class JMeterPaletteItem {
         return null;
     }
 
-    static JMeterPaletteItem discovered(String label, Kind kind, String guiClassName) {
-        return new JMeterPaletteItem(label, kind, guiClassName, null);
+    static JMeterPaletteItem discovered(String label, Kind kind, String guiClassName, String testClassName) {
+        return new JMeterPaletteItem(label, kind, guiClassName, testClassName);
     }
 
     private TestElement createViaGui() {

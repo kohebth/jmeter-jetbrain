@@ -6,6 +6,7 @@ import org.apache.jmeter.save.SaveService;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.testelement.TestPlan;
 import org.apache.jorphan.collections.HashTree;
+import org.apache.jorphan.collections.ListedHashTree;
 
 import java.io.File;
 import java.io.IOException;
@@ -47,7 +48,7 @@ final class JMeterTreeLoader {
             throw new IllegalArgumentException("JMeter tree does not contain a test plan");
         }
 
-        HashTree tree = new HashTree();
+        HashTree tree = new ListedHashTree();
         for (int i = 0; i < rootNode.getChildCount(); i++) {
             JMeterTreeNode child = (JMeterTreeNode) rootNode.getChildAt(i);
             tree.add(element(child, cloneElements), childrenToHashTree(child, cloneElements));
@@ -56,7 +57,7 @@ final class JMeterTreeLoader {
     }
 
     static HashTree toHashTree(JMeterTreeNode node) {
-        HashTree tree = new HashTree();
+        HashTree tree = new ListedHashTree();
         tree.add(node.getTestElement(), childrenToHashTree(node));
         return tree;
     }
@@ -104,7 +105,7 @@ final class JMeterTreeLoader {
     }
 
     private static HashTree childrenToHashTree(JMeterTreeNode parent, boolean cloneElements) {
-        HashTree tree = new HashTree();
+        HashTree tree = new ListedHashTree();
         for (int i = 0; i < parent.getChildCount(); i++) {
             JMeterTreeNode child = (JMeterTreeNode) parent.getChildAt(i);
             tree.add(element(child, cloneElements), childrenToHashTree(child, cloneElements));

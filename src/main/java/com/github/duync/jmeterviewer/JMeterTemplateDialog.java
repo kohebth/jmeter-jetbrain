@@ -45,7 +45,11 @@ final class JMeterTemplateDialog {
         builder.setOkOperation(() -> {
             JMeterTemplate template = list.getSelectedValue();
             if (template != null) {
-                actions.insertTemplate(template);
+                try {
+                    actions.insertTemplate(template);
+                } catch (RuntimeException exception) {
+                    JMeterIdeNotifications.error(project, exception.getMessage());
+                }
             }
             builder.getDialogWrapper().close(0);
         });
@@ -86,6 +90,7 @@ final class JMeterTemplateDialog {
     private void refresh(DefaultListModel<JMeterTemplate> model) {
         model.clear();
         JMeterTemplate.defaults().forEach(model::addElement);
+        JMeterNativeTemplateCatalog.templates().forEach(model::addElement);
         store.templates().forEach(model::addElement);
     }
 

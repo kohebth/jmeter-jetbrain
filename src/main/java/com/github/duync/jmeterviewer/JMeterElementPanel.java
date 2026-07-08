@@ -28,11 +28,12 @@ final class JMeterElementPanel {
 
     void showSelected() {
         panel.removeAll();
-        JMeterGUIComponent selectedGui = GuiPackage.getInstance().getCurrentGui();
+        GuiPackage guiPackage = GuiPackage.getInstance();
+        JMeterGUIComponent selectedGui = guiPackage == null ? null : guiPackage.getCurrentGui();
         if (selectedGui instanceof JComponent) {
             JComponent component = (JComponent) selectedGui;
             dirtyTracker.watch(component);
-            panel.add(component, BorderLayout.CENTER);
+            panel.add(scroller(component), BorderLayout.CENTER);
         } else {
             panel.add(new JLabel(missingGuiMessage()), BorderLayout.NORTH);
         }
@@ -51,8 +52,19 @@ final class JMeterElementPanel {
         panel.repaint();
     }
 
+    private JBScrollPane scroller(JComponent component) {
+        JBScrollPane scrollPane = new JBScrollPane(component);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
+        return scrollPane;
+    }
+
     private String missingGuiMessage() {
-        JMeterTreeNode currentNode = GuiPackage.getInstance().getCurrentNode();
+        GuiPackage guiPackage = GuiPackage.getInstance();
+        if (guiPackage == null || guiPackage.getCurrentNode() == null) {
+            return "No JMeter GUI is available for this node.";
+        }
+        JMeterTreeNode currentNode = guiPackage.getCurrentNode();
         Object userObject = currentNode.getUserObject();
         if (!(userObject instanceof TestElement)) {
             return "No JMeter GUI is available for this node.";

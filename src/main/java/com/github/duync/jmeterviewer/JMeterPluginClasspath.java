@@ -60,6 +60,10 @@ final class JMeterPluginClasspath {
         return new ArrayList<>(PATHS);
     }
 
+    static synchronized File jmeterHome() {
+        return jmeterHome;
+    }
+
     static synchronized String[] searchPaths() {
         List<String> paths = new ArrayList<>();
         for (File path : PATHS) {
@@ -172,15 +176,26 @@ final class JMeterPluginClasspath {
         if (looksLikeJMeterHome(normalized)) {
             return normalized;
         }
-        if (normalized.isFile() && normalized.getName().startsWith("ApacheJMeter")) {
-            File lib = normalized.getParentFile();
-            File home = lib == null ? null : lib.getParentFile();
-            return looksLikeJMeterHome(home) ? normalize(home) : null;
+        File parentHome = parentJMeterHome(normalized);
+        if (parentHome != null) {
+            return parentHome;
         }
         if (normalized.isFile() && "jmeter.properties".equals(normalized.getName())) {
             File bin = normalized.getParentFile();
             File home = bin == null ? null : bin.getParentFile();
             return looksLikeJMeterHome(home) ? normalize(home) : null;
+        }
+        return null;
+    }
+
+    private static File parentJMeterHome(File file) {
+        File current = file.isDirectory() ? file : file.getParentFile();
+        for (int i = 0; i < 4 && current != null; i++) {
+            File candidate = current.getParentFile();
+            if (looksLikeJMeterHome(candidate)) {
+                return normalize(candidate);
+            }
+            current = candidate;
         }
         return null;
     }

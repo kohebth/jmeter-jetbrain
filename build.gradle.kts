@@ -29,6 +29,7 @@ dependencies {
     implementation("org.apache.jmeter:ApacheJMeter_native:5.6.3")
     implementation("org.apache.jmeter:ApacheJMeter_tcp:5.6.3")
     implementation("org.apache.jmeter:ApacheJMeter_functions:5.6.3")
+    implementation("org.freemarker:freemarker:2.3.32")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")
 }

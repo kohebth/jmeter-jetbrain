@@ -15,6 +15,7 @@ final class JMeterEditorToolbar {
                              JButton saveAsButton,
                              JButton reloadButton,
                              JButton runButton,
+                             JButton runSelectedButton,
                              JButton runLocalButton,
                              JButton runRemoteButton,
                              JButton runAllButton,
@@ -45,6 +46,7 @@ final class JMeterEditorToolbar {
         toolbar.add(saveAsButton);
         toolbar.add(reloadButton);
         toolbar.add(runButton);
+        toolbar.add(runSelectedButton);
         toolbar.add(runLocalButton);
         toolbar.add(runRemoteButton);
         toolbar.add(runAllButton);

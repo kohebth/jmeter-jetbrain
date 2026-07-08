@@ -44,11 +44,12 @@ final class EmbeddedJMeterRuntime {
         copyResource("/bin/upgrade.properties", bin.resolve("upgrade.properties"));
         copyResource("/bin/reportgenerator.properties", bin.resolve("reportgenerator.properties"));
         copyResourceTree("bin/report-template", bin.resolve("report-template"));
+        copyResourceTree("bin/templates", bin.resolve("templates"));
 
         Path properties = bin.resolve("jmeter.properties");
         Files.writeString(properties, String.join(System.lineSeparator(),
                 "saveservice_properties=saveservice.properties",
-                "upgrade_properties=upgrade.properties",
+                "upgrade_properties=bin/upgrade.properties",
                 "language=en",
                 "jmeter.reportgenerator.overall_granularity=60000",
                 ""));

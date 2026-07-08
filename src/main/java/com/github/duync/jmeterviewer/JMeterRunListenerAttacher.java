@@ -1,6 +1,6 @@
 package com.github.duync.jmeterviewer;
 
-import org.apache.jmeter.testelement.TestPlan;
+import org.apache.jmeter.threads.AbstractThreadGroup;
 import org.apache.jorphan.collections.HashTree;
 
 final class JMeterRunListenerAttacher {
@@ -11,20 +11,20 @@ final class JMeterRunListenerAttacher {
         if (tree == null || listener == null) {
             return;
         }
-        if (!attachToTestPlans(tree, listener)) {
+        if (!attachToThreadGroups(tree, listener)) {
             tree.add(listener);
         }
     }
 
-    private static boolean attachToTestPlans(HashTree tree, Object listener) {
+    private static boolean attachToThreadGroups(HashTree tree, Object listener) {
         boolean attached = false;
         for (Object item : tree.getArray()) {
             HashTree childTree = tree.getTree(item);
-            if (item instanceof TestPlan) {
+            if (item instanceof AbstractThreadGroup) {
                 childTree.add(listener);
                 attached = true;
             }
-            attached |= attachToTestPlans(childTree, listener);
+            attached |= attachToThreadGroups(childTree, listener);
         }
         return attached;
     }

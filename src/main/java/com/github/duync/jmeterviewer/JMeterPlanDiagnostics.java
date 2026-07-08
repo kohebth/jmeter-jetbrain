@@ -17,12 +17,27 @@ final class JMeterPlanDiagnostics {
 
     static Report inspect(JMeterTreeModel model) {
         Report report = new Report();
+        inspectEnvironment(report);
         if (model == null) {
             report.errors.add("No JMeter model loaded.");
             return report;
         }
         collect((JMeterTreeNode) model.getRoot(), report);
         return report;
+    }
+
+    private static void inspectEnvironment(Report report) {
+        File home = JMeterPluginClasspath.jmeterHome();
+        report.environment.add(home == null
+                ? "Runtime: embedded JMeter"
+                : "Runtime: " + home.getAbsolutePath());
+        java.util.List<File> paths = JMeterPluginClasspath.paths();
+        report.environment.add("Plugin/runtime paths: " + paths.size());
+        for (File path : paths) {
+            if (!path.exists()) {
+                report.warnings.add("Configured JMeter path is missing: " + path.getAbsolutePath());
+            }
+        }
     }
 
     private static void collect(JMeterTreeNode node, Report report) {
@@ -117,6 +132,7 @@ final class JMeterPlanDiagnostics {
     static final class Report {
         private final java.util.List<String> errors = new ArrayList<>();
         private final java.util.List<String> warnings = new ArrayList<>();
+        private final java.util.List<String> environment = new ArrayList<>();
         private final Set<String> variables = new TreeSet<>();
         private final Set<String> functions = new TreeSet<>();
         private int elements;
@@ -129,6 +145,7 @@ final class JMeterPlanDiagnostics {
             output.append("Elements: ").append(elements)
                     .append(", enabled: ").append(enabled)
                     .append(", disabled: ").append(disabled).append('\n');
+            append(output, "Environment", environment);
             append(output, "Errors", errors);
             append(output, "Warnings", warnings);
             append(output, "Variables", variables);

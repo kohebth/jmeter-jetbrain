@@ -18,9 +18,9 @@ final class JMeterTreeActions {
         this.modified = modified;
     }
 
-    void setTree(JTree tree) {
-        this.tree = tree;
-    }
+    void setTree(JTree tree) { this.tree = tree; }
+
+    JTree tree() { return tree; }
 
     JMeterTreeNode selectedNode() {
         if (tree == null || tree.getSelectionPath() == null) {
@@ -64,6 +64,10 @@ final class JMeterTreeActions {
     }
 
     void insertTemplate(JMeterTemplate template) {
+        if (template.nativeTemplate()) {
+            insertNativeTemplate(template);
+            return;
+        }
         JMeterTreeNode lastAdded = null;
         for (JMeterTemplate.Node root : template.roots()) {
             JMeterTreeNode parent = JMeterTemplateInsertion.parent(model, selectedNode(), root);
@@ -78,6 +82,18 @@ final class JMeterTreeActions {
         if (lastAdded != null) {
             selectNode(lastAdded);
             modified.run();
+        }
+    }
+
+    private void insertNativeTemplate(JMeterTemplate template) {
+        try {
+            JMeterTreeNode added = JMeterNativeTemplateInsertion.insert(model, selectedNode(), template);
+            if (added != null) {
+                selectNode(added);
+                modified.run();
+            }
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to insert JMeter template: " + template.name(), exception);
         }
     }
 
@@ -235,13 +251,9 @@ final class JMeterTreeActions {
         }
     }
 
-    void expandAll() {
-        expandNode((JMeterTreeNode) model.getRoot());
-    }
+    void expandAll() { expandNode((JMeterTreeNode) model.getRoot()); }
 
-    void collapseAll() {
-        collapseNode((JMeterTreeNode) model.getRoot());
-    }
+    void collapseAll() { collapseNode((JMeterTreeNode) model.getRoot()); }
 
     private boolean setSelectedEnabled(boolean enabled, boolean recursive) {
         boolean changed = false;

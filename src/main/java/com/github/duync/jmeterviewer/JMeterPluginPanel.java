@@ -18,17 +18,18 @@ final class JMeterPluginPanel {
         store.applyToClasspath();
         DefaultListModel<String> model = new DefaultListModel<>();
         JList<String> list = new JList<>(model);
+        JLabel activeHome = new JLabel();
         JButton add = new JButton("Add JMeter Home/JAR");
         JButton remove = new JButton("Remove");
         JButton removeMissing = new JButton("Remove Missing");
         JButton refresh = new JButton("Refresh");
-        add.addActionListener(event -> addPath(project, store, model));
-        remove.addActionListener(event -> removeSelected(store, list, model));
+        add.addActionListener(event -> addPath(project, store, model, activeHome));
+        remove.addActionListener(event -> removeSelected(store, list, model, activeHome));
         removeMissing.addActionListener(event -> {
             store.removeMissing();
-            refresh(model);
+            refresh(model, activeHome);
         });
-        refresh.addActionListener(event -> refresh(model));
+        refresh.addActionListener(event -> refresh(model, activeHome));
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         actions.add(add);
@@ -37,13 +38,17 @@ final class JMeterPluginPanel {
         actions.add(refresh);
 
         JPanel panel = new JPanel(new BorderLayout());
+        panel.add(activeHome, BorderLayout.NORTH);
         panel.add(new JBScrollPane(list), BorderLayout.CENTER);
         panel.add(actions, BorderLayout.SOUTH);
-        refresh(model);
+        refresh(model, activeHome);
         return panel;
     }
 
-    private static void addPath(Project project, JMeterPluginClasspathStore store, DefaultListModel<String> model) {
+    private static void addPath(Project project,
+                                JMeterPluginClasspathStore store,
+                                DefaultListModel<String> model,
+                                JLabel activeHome) {
         FileChooserDescriptor descriptor = new FileChooserDescriptor(true, true, true, true, false, true)
                 .withFileFilter(file -> file.isDirectory()
                         || file.getName().endsWith(".jar")
@@ -52,22 +57,27 @@ final class JMeterPluginPanel {
         for (VirtualFile file : files) {
             store.add(new File(file.getPath()));
         }
-        refresh(model);
+        refresh(model, activeHome);
     }
 
     private static void removeSelected(JMeterPluginClasspathStore store,
                                        JList<String> list,
-                                       DefaultListModel<String> model) {
+                                       DefaultListModel<String> model,
+                                       JLabel activeHome) {
         for (String path : list.getSelectedValuesList()) {
             store.remove(new File(path));
         }
-        refresh(model);
+        refresh(model, activeHome);
     }
 
-    private static void refresh(DefaultListModel<String> model) {
+    private static void refresh(DefaultListModel<String> model, JLabel activeHome) {
         model.clear();
         for (File path : JMeterPluginClasspath.paths()) {
             model.addElement(path.getAbsolutePath());
         }
+        File home = JMeterPluginClasspath.jmeterHome();
+        activeHome.setText(home == null
+                ? "Active JMeter: embedded runtime"
+                : "Active JMeter: " + home.getAbsolutePath());
     }
 }
