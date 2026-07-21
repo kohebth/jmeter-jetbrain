@@ -23,6 +23,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.command.undo.UndoManager
 import com.intellij.openapi.components.Service
@@ -65,7 +66,8 @@ class JMeterWorkspaceService : Disposable {
     private var activeProcess: ProcessHandler? = null
     private val pendingSamples = ConcurrentLinkedQueue<ExternalSample>()
     private val sampleDrainScheduled = AtomicBoolean()
-    private val fieldSnapshotTimer = Timer(FIELD_SNAPSHOT_DELAY_MS) { flushPendingFieldEdit() }
+    private val fieldSnapshotTimer = Timer(FIELD_SNAPSHOT_DELAY_MS) { schedulePendingFieldEditFlush() }
+    private var fieldSnapshotGeneration = 0L
     private var switchBlocked = false
     private var internalDocumentSave = false
     private var reloadAfterExternalChange = false
@@ -490,7 +492,7 @@ class JMeterWorkspaceService : Disposable {
             },
             onFieldChanged = {
                 pendingVisualChange = true
-                fieldSnapshotTimer.restart()
+                restartFieldSnapshotTimer()
                 editor.refreshModifiedState()
             },
             onHistoryAction = { redo, focus ->
@@ -512,7 +514,7 @@ class JMeterWorkspaceService : Disposable {
         check(activeEditor === editor && workspace === nativeWorkspace) {
             "The JMeter test plan is no longer active."
         }
-        fieldSnapshotTimer.stop()
+        cancelPendingFieldSnapshot()
         check(synchronizeDocument(editor)) {
             "The current JMeter form could not be synchronized before replacement."
         }
@@ -556,13 +558,40 @@ class JMeterWorkspaceService : Disposable {
     }
 
     private fun endFieldEdit(editor: JMeterVisualFileEditor) {
-        fieldSnapshotTimer.stop()
+        cancelPendingFieldSnapshot()
         if (activeEditor === editor && workspace != null) {
             synchronizeDocument(editor)
             pendingVisualChange = false
         }
-        fieldSnapshotTimer.stop()
+        cancelPendingFieldSnapshot()
         fieldEditGroup = null
+    }
+
+    private fun restartFieldSnapshotTimer() {
+        fieldSnapshotGeneration++
+        fieldSnapshotTimer.restart()
+    }
+
+    /**
+     * Swing timers run on the EDT but outside IntelliJ's write-safe transaction context.
+     * Re-enter through the application queue before synchronizing the IDE document.
+     */
+    private fun schedulePendingFieldEditFlush() {
+        val expectedGeneration = fieldSnapshotGeneration
+        val application = ApplicationManager.getApplication()
+        application.invokeLater(
+            Runnable {
+                if (expectedGeneration == fieldSnapshotGeneration) {
+                    flushPendingFieldEdit()
+                }
+            },
+            ModalityState.defaultModalityState(),
+        )
+    }
+
+    private fun cancelPendingFieldSnapshot() {
+        fieldSnapshotGeneration++
+        fieldSnapshotTimer.stop()
     }
 
     private fun flushPendingFieldEdit() {
@@ -570,7 +599,7 @@ class JMeterWorkspaceService : Disposable {
         if (!disposed && workspace != null) {
             synchronizeDocument(editor)
             pendingVisualChange = false
-            fieldSnapshotTimer.stop()
+            cancelPendingFieldSnapshot()
             editor.refreshModifiedState()
         }
     }
@@ -585,7 +614,7 @@ class JMeterWorkspaceService : Disposable {
             return
         }
 
-        fieldSnapshotTimer.stop()
+        cancelPendingFieldSnapshot()
         snapshotIntoDocument(editor, nativeWorkspace)
         fieldEditGroup = null
 
@@ -611,7 +640,7 @@ class JMeterWorkspaceService : Disposable {
             editor.virtualFile.toNioPath(),
         )
         editor.project.getService(JMeterToolWindowController::class.java).resetTestPlanSearch()
-        fieldSnapshotTimer.stop()
+        cancelPendingFieldSnapshot()
         val fingerprint = DocumentFingerprint.of(text)
         (syncState ?: DocumentSyncState(fingerprint).also { syncState = it }).accept(fingerprint)
         pendingVisualChange = false
@@ -868,7 +897,7 @@ class JMeterWorkspaceService : Disposable {
     }
 
     private fun detach(editor: JMeterVisualFileEditor) {
-        fieldSnapshotTimer.stop()
+        cancelPendingFieldSnapshot()
         textAreaAdapters?.dispose()
         textAreaAdapters = null
         editor.showLanguageContext(null)
@@ -942,7 +971,7 @@ class JMeterWorkspaceService : Disposable {
             pendingRun?.let(::cleanupRunFiles)
             activeRun?.let(::cleanupRunFiles)
             pendingSamples.clear()
-            fieldSnapshotTimer.stop()
+            cancelPendingFieldSnapshot()
             textAreaAdapters?.dispose()
             textAreaAdapters = null
             workspace?.setExecutionActionListener(null)
