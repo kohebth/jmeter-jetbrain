@@ -17,36 +17,36 @@
 
 package org.apache.jmeter.gui;
 
-import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
-import java.net.URL;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import javax.swing.ImageIcon;
-import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JToolBar;
 import javax.swing.JTree;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
+import javax.swing.event.TreeExpansionEvent;
+import javax.swing.event.TreeExpansionListener;
 import javax.swing.text.JTextComponent;
+import javax.swing.tree.DefaultTreeSelectionModel;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
 
@@ -61,9 +61,12 @@ import org.apache.jmeter.gui.tree.JMeterTreeModel;
 import org.apache.jmeter.gui.tree.JMeterTreeNode;
 import org.apache.jmeter.gui.util.JSyntaxTextArea;
 import org.apache.jmeter.samplers.Clearable;
+import org.apache.jmeter.reporters.ResultCollector;
+import org.apache.jmeter.reporters.ResultCollectorHelper;
 import org.apache.jmeter.save.SaveService;
+import org.apache.jmeter.samplers.SampleResult;
 import org.apache.jmeter.testelement.TestElement;
-import org.apache.jmeter.util.JMeterUtils;
+import org.apache.jmeter.visualizers.Visualizer;
 import org.apache.jorphan.collections.HashTree;
 import org.apache.jorphan.gui.ui.TextComponentUI;
 import org.apiguardian.api.API;
@@ -89,16 +92,11 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
     private final CheckDirty dirtyTracker;
     private final Start startCommand;
     private final JComponent embeddedComponent;
-    private final JButton runButton;
-    private final JButton shutdownButton;
-    private final JButton stopButton;
-    private final Timer executionStateTimer;
     private final Map<String, ResultSession> resultSessions = new LinkedHashMap<>();
     private final Deque<ResultSession> reusableResultSessions = new ArrayDeque<>();
     private JTree outlineTree;
     private JComponent outlineComponent;
     private Runnable modelChangeListener = () -> { };
-    private ActionListener executionActionListener;
     private boolean closed;
 
     private EmbeddedJMeterWorkspace(
@@ -110,24 +108,8 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         this.mainFrame = mainFrame;
         this.dirtyTracker = dirtyTracker;
         this.startCommand = startCommand;
-        this.runButton = createToolbarButton(
-                "Run selected Thread Group(s)",
-                RUN_SELECTED_THREAD_GROUPS,
-                "org/apache/jmeter/images/toolbar/22x22/arrow-right-3.png");
-        this.shutdownButton = createToolbarButton(
-                JMeterUtils.getResString("shutdown"),
-                SHUTDOWN_TEST,
-                "org/apache/jmeter/images/toolbar/22x22/process-stop-7.png");
-        this.stopButton = createToolbarButton(
-                JMeterUtils.getResString("stop"),
-                STOP_TEST,
-                "org/apache/jmeter/images/toolbar/22x22/road-sign-us-stop.png");
-        this.embeddedComponent = createEmbeddedComponent();
+        this.embeddedComponent = mainFrame.getEmbeddedComponent();
         disablePerTextUndo(this.embeddedComponent);
-        this.executionStateTimer = new Timer(250, event -> updateExecutionControls());
-        this.executionStateTimer.start();
-        mainFrame.getTree().addTreeSelectionListener(event -> updateExecutionControls());
-        updateExecutionControls();
     }
 
     /**
@@ -168,7 +150,10 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
                     new EmbeddedJMeterWorkspace(guiPackage, mainFrame, dirtyTracker, startCommand);
             actionRouter.setEmbeddedPostActionListener(
                     event -> {
-                        disablePerTextUndo(workspace.embeddedComponent);
+                        Object currentGui = workspace.guiPackage.getCurrentGui();
+                        if (currentGui instanceof JComponent) {
+                            disablePerTextUndo((JComponent) currentGui);
+                        }
                         workspace.modelChangeListener.run();
                     });
 
@@ -201,7 +186,6 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
     /** @return JMeter's native tree/form editor surface. */
     public JComponent getComponent() {
         ensureOpen();
-        disablePerTextUndo(embeddedComponent);
         return embeddedComponent;
     }
 
@@ -216,10 +200,11 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         if (outlineTree == null) {
             JTree authoringTree = mainFrame.getTree();
             outlineTree = new JTree(authoringTree.getModel());
-            outlineTree.setSelectionModel(authoringTree.getSelectionModel());
+            outlineTree.setSelectionModel(new DefaultTreeSelectionModel());
             outlineTree.setCellRenderer(authoringTree.getCellRenderer());
             outlineTree.setRootVisible(authoringTree.isRootVisible());
             outlineTree.setShowsRootHandles(authoringTree.getShowsRootHandles());
+            synchronizeTrees(authoringTree, outlineTree);
             outlineComponent = new JScrollPane(outlineTree);
         }
         return outlineComponent;
@@ -257,10 +242,10 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         modelChangeListener = listener == null ? () -> { } : listener;
     }
 
-    /** Set the host callback for the three embedded execution toolbar actions. */
+    /** Set the host callback for native selected-thread-group context actions. */
     public void setExecutionActionListener(ActionListener listener) {
         ensureOpen();
-        executionActionListener = listener;
+        startCommand.setSelectedThreadGroupRunListener(listener);
     }
 
     /** @return whether the native selection contains runnable thread groups. */
@@ -282,7 +267,6 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         notifyIfModelChanged();
         boolean started = startCommand.startSelectedThreadGroups(
                 resultSession(sessionId).collectors);
-        updateExecutionControls();
         return started;
     }
 
@@ -291,7 +275,6 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         requireEventDispatchThread();
         ensureOpen();
         startCommand.shutdownEmbeddedTest();
-        updateExecutionControls();
     }
 
     /** Stop the running embedded test immediately. */
@@ -299,7 +282,6 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         requireEventDispatchThread();
         ensureOpen();
         startCommand.stopEmbeddedTest();
-        updateExecutionControls();
     }
 
     /** @return whether the selected-thread-group engine is active. */
@@ -377,6 +359,45 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         }
     }
 
+    /**
+     * Serialize only the selected thread groups and add a transient listener
+     * that streams XML sample fragments to the IDE result bridge.
+     *
+     * @param actionCommand native JMeter run command
+     * @param port loopback bridge port
+     * @param token per-run authentication token
+     * @param journalPath fallback journal used if the bridge is unavailable
+     * @return restricted JMX, or {@code null} if no thread group is selected
+     * @throws IOException when serialization fails
+     */
+    public byte[] snapshotSelectedThreadGroups(
+            String actionCommand,
+            int port,
+            String token,
+            Path journalPath) throws IOException {
+        requireEventDispatchThread();
+        ensureOpen();
+        notifyIfModelChanged();
+        TestElement bridgeListener = createResultBridgeListener(port, token, journalPath);
+        HashTree tree = startCommand.createSelectedThreadGroupsTree(
+                actionCommand,
+                Collections.singletonList(bridgeListener));
+        if (tree == null) {
+            return null;
+        }
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            SaveService.saveTree(tree, output);
+            return output.toByteArray();
+        }
+    }
+
+    /** Add one externally executed sample to both native result views. */
+    public void appendSampleResult(String sessionId, byte[] xmlFragment) throws IOException {
+        requireEventDispatchThread();
+        ensureOpen();
+        resultSession(sessionId).append(xmlFragment);
+    }
+
     /** @return whether the native model differs from its saved baseline. */
     public boolean isDirty() {
         requireEventDispatchThread();
@@ -405,7 +426,6 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
             return;
         }
         closed = true;
-        executionStateTimer.stop();
         if (startCommand.isEmbeddedTestRunning()) {
             startCommand.stopEmbeddedTest();
         }
@@ -414,7 +434,7 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         }
         resultSessions.clear();
         reusableResultSessions.clear();
-        executionActionListener = null;
+        startCommand.setSelectedThreadGroupRunListener(null);
         modelChangeListener = () -> { };
         guiPackage.setDialogParent(null);
         ActionRouter.getInstance().setEmbeddedPostActionListener(null);
@@ -422,47 +442,7 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         GuiPackage.disposeInstance(guiPackage);
     }
 
-    private JComponent createEmbeddedComponent() {
-        JToolBar toolbar = new JToolBar();
-        toolbar.setFloatable(false);
-        toolbar.add(runButton);
-        toolbar.addSeparator();
-        toolbar.add(shutdownButton);
-        toolbar.add(stopButton);
-
-        JPanel component = new JPanel(new BorderLayout());
-        component.add(toolbar, BorderLayout.NORTH);
-        component.add(mainFrame.getEmbeddedComponent(), BorderLayout.CENTER);
-        return component;
-    }
-
-    private JButton createToolbarButton(String tooltip, String actionCommand, String iconPath) {
-        URL iconUrl = JMeterUtils.class.getClassLoader().getResource(iconPath);
-        JButton button = iconUrl == null ? new JButton(tooltip) : new JButton(new ImageIcon(iconUrl));
-        button.setToolTipText(tooltip);
-        button.setActionCommand(actionCommand);
-        button.setFocusable(false);
-        button.addActionListener(event -> {
-            ActionListener listener = executionActionListener;
-            if (listener != null) {
-                listener.actionPerformed(new ActionEvent(
-                        this,
-                        ActionEvent.ACTION_PERFORMED,
-                        event.getActionCommand()));
-            }
-        });
-        return button;
-    }
-
-    private void updateExecutionControls() {
-        boolean running = startCommand.isEmbeddedTestRunning();
-        runButton.setEnabled(!running && startCommand.canRunSelectedThreadGroups());
-        shutdownButton.setEnabled(running);
-        stopButton.setEnabled(running);
-    }
-
     private void notifyIfModelChanged() {
-        disablePerTextUndo(embeddedComponent);
         if (guiPackage.updateCurrentNodePreservingEditorState()) {
             modelChangeListener.run();
         }
@@ -540,6 +520,10 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
     private static void disablePerTextUndo(Component component) {
         if (component instanceof JTextComponent) {
             JTextComponent textComponent = (JTextComponent) component;
+            if (Boolean.TRUE.equals(textComponent.getClientProperty(TEXT_UNDO_DISABLED_PROPERTY))) {
+                return;
+            }
+            textComponent.putClientProperty(TEXT_UNDO_DISABLED_PROPERTY, Boolean.TRUE);
             TextComponentUI.uninstallUndo(textComponent);
             textComponent.getActionMap().remove("undo");
             textComponent.getActionMap().remove("redo");
@@ -554,6 +538,156 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         }
     }
 
+    private static void synchronizeTrees(JTree authoringTree, JTree synchronizedTree) {
+        boolean[] synchronizingSelection = { false };
+        authoringTree.addTreeSelectionListener(event -> {
+            if (synchronizingSelection[0]) {
+                return;
+            }
+            synchronizingSelection[0] = true;
+            try {
+                synchronizedTree.setSelectionPaths(authoringTree.getSelectionPaths());
+                TreePath lead = authoringTree.getLeadSelectionPath();
+                if (lead != null) {
+                    synchronizedTree.scrollPathToVisible(lead);
+                }
+            } finally {
+                synchronizingSelection[0] = false;
+            }
+        });
+        synchronizedTree.addTreeSelectionListener(event -> {
+            if (synchronizingSelection[0]) {
+                return;
+            }
+            synchronizingSelection[0] = true;
+            try {
+                authoringTree.setSelectionPaths(synchronizedTree.getSelectionPaths());
+                TreePath lead = synchronizedTree.getLeadSelectionPath();
+                if (lead != null) {
+                    authoringTree.scrollPathToVisible(lead);
+                }
+            } finally {
+                synchronizingSelection[0] = false;
+            }
+        });
+
+        boolean[] synchronizingExpansion = { false };
+        installExpansionSynchronization(authoringTree, synchronizedTree, synchronizingExpansion);
+        installExpansionSynchronization(synchronizedTree, authoringTree, synchronizingExpansion);
+        for (int row = 0; row < authoringTree.getRowCount(); row++) {
+            TreePath path = authoringTree.getPathForRow(row);
+            if (path != null && authoringTree.isExpanded(path)) {
+                synchronizedTree.expandPath(path);
+            }
+        }
+        synchronizedTree.setSelectionPaths(authoringTree.getSelectionPaths());
+    }
+
+    private static void installExpansionSynchronization(
+            JTree source,
+            JTree target,
+            boolean[] synchronizing) {
+        source.addTreeExpansionListener(new TreeExpansionListener() {
+            @Override
+            public void treeExpanded(TreeExpansionEvent event) {
+                synchronizeExpansion(target, event.getPath(), true, synchronizing);
+            }
+
+            @Override
+            public void treeCollapsed(TreeExpansionEvent event) {
+                synchronizeExpansion(target, event.getPath(), false, synchronizing);
+            }
+        });
+    }
+
+    private static void synchronizeExpansion(
+            JTree target,
+            TreePath path,
+            boolean expanded,
+            boolean[] synchronizing) {
+        if (synchronizing[0]) {
+            return;
+        }
+        synchronizing[0] = true;
+        try {
+            if (expanded) {
+                target.expandPath(path);
+            } else {
+                target.collapsePath(path);
+            }
+        } finally {
+            synchronizing[0] = false;
+        }
+    }
+
+    private static TestElement createResultBridgeListener(
+            int port,
+            String token,
+            Path journalPath) {
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("Invalid result bridge port: " + port);
+        }
+        String requiredToken = Objects.requireNonNull(token, "token").trim();
+        if (requiredToken.isEmpty()) {
+            throw new IllegalArgumentException("The result bridge token must not be empty");
+        }
+        String encodedJournal = Base64.getEncoder().encodeToString(
+                Objects.requireNonNull(journalPath, "journalPath")
+                        .toAbsolutePath()
+                        .normalize()
+                        .toString()
+                        .getBytes(StandardCharsets.UTF_8));
+        String script = resultBridgeScript(port, requiredToken, encodedJournal);
+        try {
+            ClassLoader loader = Thread.currentThread().getContextClassLoader();
+            Object listener = Class.forName(
+                    "org.apache.jmeter.visualizers.JSR223Listener",
+                    true,
+                    loader).getDeclaredConstructor().newInstance();
+            listener.getClass().getMethod("setName", String.class)
+                    .invoke(listener, "JetBrains Live Results");
+            listener.getClass().getMethod("setScriptLanguage", String.class)
+                    .invoke(listener, "groovy");
+            listener.getClass().getMethod("setCacheKey", String.class)
+                    .invoke(listener, "jetbrains-results-" + requiredToken);
+            listener.getClass().getMethod("setScript", String.class).invoke(listener, script);
+            if (!(listener instanceof TestElement)) {
+                throw new IllegalStateException("JMeter returned an invalid JSR223 listener");
+            }
+            return (TestElement) listener;
+        } catch (ReflectiveOperationException | LinkageError failure) {
+            throw new IllegalStateException("Unable to create the live result bridge listener", failure);
+        }
+    }
+
+    private static String resultBridgeScript(int port, String token, String encodedJournal) {
+        return "def sampleWriter = new java.io.StringWriter()\n"
+                + "org.apache.jmeter.save.SaveService.saveSampleResult(sampleEvent, sampleWriter)\n"
+                + "byte[] payload = sampleWriter.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)\n"
+                + "String sampleId = java.util.UUID.randomUUID().toString()\n"
+                + "byte[] idBytes = sampleId.getBytes(java.nio.charset.StandardCharsets.UTF_8)\n"
+                + "def journalPath = java.nio.file.Paths.get(new String(java.util.Base64.decoder.decode('"
+                + encodedJournal
+                + "'), java.nio.charset.StandardCharsets.UTF_8))\n"
+                + "synchronized (('jmeter-jetbrains-" + token + "').intern()) {\n"
+                + "  def journal = new java.io.DataOutputStream(new java.io.BufferedOutputStream("
+                + "java.nio.file.Files.newOutputStream(journalPath, java.nio.file.StandardOpenOption.CREATE, "
+                + "java.nio.file.StandardOpenOption.APPEND)))\n"
+                + "  try { journal.writeInt(idBytes.length); journal.write(idBytes); "
+                + "journal.writeInt(payload.length); journal.write(payload) } finally { journal.close() }\n"
+                + "}\n"
+                + "try {\n"
+                + "  def socket = new java.net.Socket()\n"
+                + "  socket.connect(new java.net.InetSocketAddress(java.net.InetAddress.loopbackAddress, "
+                + port
+                + "), 750)\n"
+                + "  def output = new java.io.DataOutputStream(new java.io.BufferedOutputStream(socket.outputStream))\n"
+                + "  try { output.writeUTF('" + token + "'); output.writeInt(idBytes.length); "
+                + "output.write(idBytes); output.writeInt(payload.length); output.write(payload); output.flush() } "
+                + "finally { output.close(); socket.close() }\n"
+                + "} catch (Exception ignored) { }\n";
+    }
+
     private static final class ResultSession {
         private static final String RESULTS_TREE_CLASS =
                 "org.apache.jmeter.visualizers.ViewResultsFullVisualizer";
@@ -562,19 +696,52 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
 
         private final JComponent resultsTree;
         private final JComponent aggregateReport;
+        private final Visualizer resultsVisualizer;
+        private final Visualizer aggregateVisualizer;
+        private final ResultCollector resultCollector;
         private final List<TestElement> collectors;
 
         private ResultSession() {
             resultsTree = createVisualizer(RESULTS_TREE_CLASS);
             aggregateReport = createVisualizer(AGGREGATE_REPORT_CLASS);
+            resultsVisualizer = (Visualizer) resultsTree;
+            aggregateVisualizer = (Visualizer) aggregateReport;
             disablePerTextUndo(resultsTree);
             disablePerTextUndo(aggregateReport);
-            collectors = Arrays.asList(createCollector(resultsTree), createCollector(aggregateReport));
+            resultCollector = createCollector(resultsTree);
+            collectors = Arrays.asList(resultCollector, createCollector(aggregateReport));
         }
 
         private void clear() {
             ((Clearable) resultsTree).clearData();
             ((Clearable) aggregateReport).clearData();
+        }
+
+        private void append(byte[] xmlFragment) throws IOException {
+            Objects.requireNonNull(xmlFragment, "xmlFragment");
+            byte[] prefix = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    + "<testResults version=\"1.2\">").getBytes(StandardCharsets.UTF_8);
+            byte[] suffix = "</testResults>".getBytes(StandardCharsets.UTF_8);
+            ByteArrayOutputStream document = new ByteArrayOutputStream(
+                    prefix.length + xmlFragment.length + suffix.length);
+            document.write(prefix);
+            document.write(xmlFragment);
+            document.write(suffix);
+            Visualizer composite = new Visualizer() {
+                @Override
+                public void add(SampleResult sample) {
+                    resultsVisualizer.add(sample);
+                    aggregateVisualizer.add(sample);
+                }
+
+                @Override
+                public boolean isStats() {
+                    return false;
+                }
+            };
+            SaveService.loadTestResults(
+                    new ByteArrayInputStream(document.toByteArray()),
+                    new ResultCollectorHelper(resultCollector, composite));
         }
 
         private static JComponent createVisualizer(String className) {
@@ -583,7 +750,9 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
                 Object visualizer = Class.forName(className, true, loader)
                         .getDeclaredConstructor()
                         .newInstance();
-                if (!(visualizer instanceof JComponent) || !(visualizer instanceof Clearable)) {
+                if (!(visualizer instanceof JComponent)
+                        || !(visualizer instanceof Clearable)
+                        || !(visualizer instanceof Visualizer)) {
                     throw new IllegalStateException(className + " is not an embeddable JMeter visualizer");
                 }
                 return (JComponent) visualizer;
@@ -592,13 +761,13 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
             }
         }
 
-        private static TestElement createCollector(JComponent visualizer) {
+        private static ResultCollector createCollector(JComponent visualizer) {
             try {
                 Object collector = visualizer.getClass().getMethod("createTestElement").invoke(visualizer);
-                if (!(collector instanceof TestElement)) {
+                if (!(collector instanceof ResultCollector)) {
                     throw new IllegalStateException("JMeter visualizer returned an invalid result collector");
                 }
-                return (TestElement) collector;
+                return (ResultCollector) collector;
             } catch (ReflectiveOperationException | LinkageError failure) {
                 throw visualizerFailure(visualizer.getClass().getName(), failure);
             }
@@ -637,4 +806,7 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
             throw new IllegalStateException("Embedded JMeter workspace operations must run on the Swing EDT");
         }
     }
+
+    private static final String TEXT_UNDO_DISABLED_PROPERTY =
+            "jmeter.intellij.text.undo.disabled";
 }

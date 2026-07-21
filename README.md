@@ -26,7 +26,8 @@ IDE restart because JMeter keeps process-global GUI state.
 JMeter supplies its standard tree, forms, context menus, validation, and JMX
 serialization. JetBrains supplies editor tabs, file navigation, Save/Save All,
 external-change handling, and the application look and feel. JMeter's standalone
-toolbar, menu bar, logger, runner controls, and file actions are not exposed.
+toolbar, menu bar, logger, and file actions are not exposed. The native tree's
+right-click **Start**, **Start no pauses**, and **Validate** actions are retained.
 
 JMeter's GUI state is process-global, so the plugin deliberately owns one shared
 native workspace. Before another visual JMX tab becomes active, the current
@@ -36,8 +37,22 @@ external`, `Overwrite visual`, or `Cancel`.
 
 The editor supports local physical JMX files and loads the standard modules and
 compatible third-party plugins from the selected JMeter 5.6.3 installation.
-Execution/results, recorder, templates, and report generation are intentionally
-not exposed in the JetBrains UI.
+Recorder, templates, and report generation are intentionally not exposed in the
+JetBrains UI.
+
+Large JMeter text areas are backed by temporary IntelliJ editors. Their language
+is inferred from JMeter's syntax style and can be overridden from the footer;
+**Reformat** uses the installed IDE language formatter. These temporary fields
+do not retain independent undo stacks—the JMX document remains the single undo
+and redo history.
+
+Selected thread groups run through a normal IntelliJ **JMeter Selected Thread
+Groups** Run Configuration and the configured installation's `bin/jmeter`
+launcher (`jmeter.bat` on Windows). The IDE process console owns Stop, only one
+JMeter process may run at a time, and the shared visual workspace remains bound
+to that JMX until completion. Other XML editors remain usable. A token-protected
+loopback bridge streams samples into the native **Results Tree** and **Aggregate
+Report** tabs, with a temporary journal as a delivery fallback.
 
 ## Runtime isolation
 
@@ -56,7 +71,9 @@ compatibility patch remains reviewable and reproducible.
 The repository includes JDK 17 wrappers for the normal verification paths:
 
 ```bash
+./scripts/compile-jdk17.sh
 ./scripts/test-jdk17.sh
+./scripts/build-jdk17.sh
 ./scripts/verify-jdk17.sh
 ./scripts/plugin-verifier-jdk17.sh
 ```
@@ -64,6 +81,10 @@ The repository includes JDK 17 wrappers for the normal verification paths:
 `test-jdk17.sh` accepts Gradle test filters, for example
 `./scripts/test-jdk17.sh --tests '*JMeterInstallationTest'`. Override the
 default local JDK path with `JMETER_VIEWER_JAVA_HOME=/path/to/jdk-17`.
+
+`compile-jdk17.sh` is the fast production-source check, while
+`build-jdk17.sh` runs the normal Gradle build. Both accept additional Gradle
+arguments.
 
 `verify-jdk17.sh` runs the complete test suite, builds the distributable, checks
 that no JMeter installation or conflicting runtime libraries were bundled, and

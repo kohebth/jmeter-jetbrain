@@ -59,7 +59,7 @@ class JMeterRuntimeService : Disposable {
         return requestedHome != activeHome
     }
 
-    private fun configuredInstallation(): JMeterInstallation {
+    internal fun configuredInstallation(): JMeterInstallation {
         val configuredHome = ApplicationManager.getApplication()
             .getService(JMeterSettings::class.java)
             .jmeterHome

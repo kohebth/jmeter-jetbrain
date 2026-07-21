@@ -23,6 +23,15 @@ internal interface JMeterWorkspace : AutoCloseable {
 
     fun snapshot(): ByteArray
 
+    fun snapshotSelectedThreadGroups(
+        actionCommand: String,
+        port: Int,
+        token: String,
+        journalPath: Path,
+    ): ByteArray?
+
+    fun appendSampleResult(sessionId: String, xmlFragment: ByteArray)
+
     val isDirty: Boolean
 
     fun markSaved()
@@ -70,6 +79,18 @@ internal class ReflectiveJMeterWorkspace(
         Path::class.java,
     )
     private val snapshot = workspaceClass.getMethod("snapshot")
+    private val snapshotSelectedThreadGroupsMethod = workspaceClass.getMethod(
+        "snapshotSelectedThreadGroups",
+        String::class.java,
+        Int::class.javaPrimitiveType,
+        String::class.java,
+        Path::class.java,
+    )
+    private val appendSampleResultMethod = workspaceClass.getMethod(
+        "appendSampleResult",
+        String::class.java,
+        ByteArray::class.java,
+    )
     private val getDirty = workspaceClass.getMethod("isDirty")
     private val markSaved = workspaceClass.getMethod("markSaved")
     private val setModelChangeListenerMethod = workspaceClass.getMethod(
@@ -122,6 +143,23 @@ internal class ReflectiveJMeterWorkspace(
 
     override fun snapshot(): ByteArray = call(snapshot) as? ByteArray
         ?: throw JMeterRuntimeException("JMeter returned an incompatible JMX snapshot")
+
+    override fun snapshotSelectedThreadGroups(
+        actionCommand: String,
+        port: Int,
+        token: String,
+        journalPath: Path,
+    ): ByteArray? = call(
+        snapshotSelectedThreadGroupsMethod,
+        actionCommand,
+        port,
+        token,
+        journalPath,
+    ) as? ByteArray
+
+    override fun appendSampleResult(sessionId: String, xmlFragment: ByteArray) {
+        call(appendSampleResultMethod, sessionId, xmlFragment)
+    }
 
     override val isDirty: Boolean
         get() = call(getDirty) as? Boolean

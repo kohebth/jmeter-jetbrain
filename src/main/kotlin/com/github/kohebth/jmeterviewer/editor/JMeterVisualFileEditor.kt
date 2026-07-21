@@ -29,8 +29,9 @@ import java.beans.PropertyChangeListener
 import java.beans.PropertyChangeSupport
 import javax.swing.JButton
 import javax.swing.JComponent
+import javax.swing.JComboBox
+import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.Timer
 
 class JMeterVisualFileEditor(
     val project: Project,
@@ -39,9 +40,13 @@ class JMeterVisualFileEditor(
     private val userData = UserDataHolderBase()
     private val propertyChanges = PropertyChangeSupport(this)
     private val host = JBPanel<JBPanel<*>>(BorderLayout())
+    private val languageFooter = JPanel(FlowLayout(FlowLayout.TRAILING, 8, 3))
+    private val languageSelector = JComboBox<JMeterEditorLanguage>()
+    private val reformatButton = JButton("Reformat")
     private val workspaceService = ApplicationManager.getApplication()
         .getService(JMeterWorkspaceService::class.java)
-    private val modifiedPoller = Timer(MODIFIED_POLL_INTERVAL_MS) { refreshModifiedState() }
+    private var languageContext: JMeterLanguageContext? = null
+    private var updatingLanguageSelector = false
     private var lastModified = false
     private var disposed = false
 
@@ -50,21 +55,52 @@ class JMeterVisualFileEditor(
     ) { "JMeter visual editor requires a text Document for ${virtualFile.path}" }
 
     init {
+        languageFooter.apply {
+            add(JLabel("Language:"))
+            add(languageSelector)
+            add(reformatButton)
+            isVisible = false
+        }
+        languageSelector.addActionListener {
+            if (!updatingLanguageSelector) {
+                (languageSelector.selectedItem as? JMeterEditorLanguage)?.let { selected ->
+                    languageContext?.selectLanguage?.invoke(selected)
+                }
+            }
+        }
+        reformatButton.addActionListener { languageContext?.reformat?.invoke() }
         showStatus("Select this tab to load JMeter's native editor.")
         document.addDocumentListener(object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
                 refreshModifiedState()
             }
         }, this)
-        modifiedPoller.isRepeats = true
     }
 
     internal fun attachNative(component: JComponent) {
         removeFromParent(component)
         host.removeAll()
         host.add(component, BorderLayout.CENTER)
+        host.add(languageFooter, BorderLayout.SOUTH)
         host.revalidate()
         host.repaint()
+    }
+
+    internal fun showLanguageContext(context: JMeterLanguageContext?) {
+        languageContext = context
+        updatingLanguageSelector = true
+        try {
+            languageSelector.removeAllItems()
+            context?.languages?.forEach(languageSelector::addItem)
+            if (context != null) {
+                languageSelector.selectedItem = context.selected
+            }
+            languageFooter.isVisible = context != null
+        } finally {
+            updatingLanguageSelector = false
+        }
+        languageFooter.revalidate()
+        languageFooter.repaint()
     }
 
     internal fun detachNative(component: JComponent) {
@@ -130,6 +166,7 @@ class JMeterVisualFileEditor(
     }
 
     private fun showStatus(text: String) {
+        showLanguageContext(null)
         host.removeAll()
         host.add(JBLabel(text), BorderLayout.NORTH)
         host.revalidate()
@@ -180,13 +217,11 @@ class JMeterVisualFileEditor(
     override fun isValid(): Boolean = !disposed && virtualFile.isValid
 
     override fun selectNotify() {
-        modifiedPoller.start()
         workspaceService.activate(this)
         refreshModifiedState()
     }
 
     override fun deselectNotify() {
-        modifiedPoller.stop()
         workspaceService.deactivate(this)
         refreshModifiedState()
     }
@@ -212,7 +247,6 @@ class JMeterVisualFileEditor(
             return
         }
         disposed = true
-        modifiedPoller.stop()
         workspaceService.unregister(this)
     }
 
@@ -222,7 +256,4 @@ class JMeterVisualFileEditor(
         .replace(">", "&gt;")
         .replace("\n", "<br>")
 
-    private companion object {
-        const val MODIFIED_POLL_INTERVAL_MS = 400
-    }
 }

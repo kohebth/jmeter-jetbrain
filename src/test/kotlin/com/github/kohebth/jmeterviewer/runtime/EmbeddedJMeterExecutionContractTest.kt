@@ -2,6 +2,7 @@ package com.github.kohebth.jmeterviewer.runtime
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.awt.event.ActionListener
 
 class EmbeddedJMeterExecutionContractTest {
     @Test
@@ -22,6 +23,21 @@ class EmbeddedJMeterExecutionContractTest {
             assertEquals(
                 Boolean::class.javaPrimitiveType,
                 start.getMethod("isEmbeddedTestRunning").returnType,
+            )
+            assertEquals(
+                Void.TYPE,
+                start.getMethod(
+                    "setSelectedThreadGroupRunListener",
+                    ActionListener::class.java,
+                ).returnType,
+            )
+            assertEquals(
+                "org.apache.jorphan.collections.HashTree",
+                start.getMethod(
+                    "createSelectedThreadGroupsTree",
+                    String::class.java,
+                    List::class.java,
+                ).returnType.name,
             )
         }
     }

@@ -1,23 +1,46 @@
 package com.github.kohebth.jmeterviewer.editor
 
+import com.github.kohebth.jmeterviewer.execution.JMeterLaunchRequest
+import com.github.kohebth.jmeterviewer.execution.JMeterResultBridge
+import com.github.kohebth.jmeterviewer.execution.JMeterRunConfiguration
+import com.github.kohebth.jmeterviewer.execution.JMeterRunConfigurationType
+import com.github.kohebth.jmeterviewer.execution.JMeterRunMode
 import com.github.kohebth.jmeterviewer.runtime.JMeterConfigurationException
 import com.github.kohebth.jmeterviewer.runtime.JMeterRuntimeService
 import com.github.kohebth.jmeterviewer.runtime.JMeterWorkspace
 import com.github.kohebth.jmeterviewer.toolwindow.JMeterToolWindowController
+import com.intellij.execution.ProgramRunnerUtil
+import com.intellij.execution.RunManager
+import com.intellij.execution.configurations.ConfigurationTypeUtil
+import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.execution.executors.DefaultRunExecutor
+import com.intellij.execution.process.ProcessAdapter
+import com.intellij.execution.process.ProcessEvent
+import com.intellij.execution.process.ProcessHandler
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.command.undo.UndoManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.util.concurrency.AppExecutorUtil
 import java.awt.event.ActionListener
 import java.io.ByteArrayInputStream
+import java.nio.file.Files
 import java.nio.charset.StandardCharsets
+import java.nio.file.StandardOpenOption
 import java.util.IdentityHashMap
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JComponent
 import javax.swing.Timer
@@ -32,9 +55,14 @@ class JMeterWorkspaceService : Disposable {
     private val resultSessionIds = IdentityHashMap<VirtualFile, String>()
     private var textAreaAdapters: JMeterTextAreaAdapters? = null
     private var fieldEditGroup: Any? = null
+    private var pendingVisualChange = false
     private var runningFile: VirtualFile? = null
     private var runningEditor: JMeterVisualFileEditor? = null
-    private var wasTestRunning = false
+    private var pendingRun: JMeterLaunchRequest? = null
+    private var activeRun: JMeterLaunchRequest? = null
+    private var activeProcess: ProcessHandler? = null
+    private val pendingSamples = ConcurrentLinkedQueue<ExternalSample>()
+    private val sampleDrainScheduled = AtomicBoolean()
     private val fieldSnapshotTimer = Timer(FIELD_SNAPSHOT_DELAY_MS) { flushPendingFieldEdit() }
     private var switchBlocked = false
     private var internalDocumentSave = false
@@ -50,13 +78,11 @@ class JMeterWorkspaceService : Disposable {
             return@onEdt
         }
 
-        if (
-            workspace?.isTestRunning == true &&
-            runningFile != null &&
-            runningFile != editor.virtualFile
-        ) {
-            editor.showSwitchBlocked("The running JMeter test plan is pinned until it stops.")
-            runningEditor?.requestReselect()
+        if (runInProgress() && runningFile != null && runningFile != editor.virtualFile) {
+            val message = "${runningFile?.name} is running in the JMeter process. " +
+                "The shared visual workspace stays reserved until the process stops; XML editors remain available."
+            editor.showSwitchBlocked(message)
+            notifyRunPinned(editor.project, message)
             return@onEdt
         }
 
@@ -116,7 +142,6 @@ class JMeterWorkspaceService : Disposable {
             attach(editor, nativeWorkspace.component)
             nativeWorkspace.setDialogParent(editor.component)
             bindWorkspaceSurfaces(editor, nativeWorkspace)
-            refreshExecutionState(nativeWorkspace)
         } catch (failure: Exception) {
             failSurfaceBinding(editor, nativeWorkspace, failure)
         } catch (failure: LinkageError) {
@@ -130,13 +155,6 @@ class JMeterWorkspaceService : Disposable {
 
     fun deactivate(editor: JMeterVisualFileEditor) = onEdt {
         if (activeEditor !== editor) {
-            return@onEdt
-        }
-
-        workspace?.let(::refreshExecutionState)
-        if (workspace?.isTestRunning == true && runningFile == editor.virtualFile) {
-            editor.showSwitchBlocked("The running JMeter test plan is pinned until it stops.")
-            editor.requestReselect()
             return@onEdt
         }
 
@@ -155,14 +173,6 @@ class JMeterWorkspaceService : Disposable {
     fun unregister(editor: JMeterVisualFileEditor) = onEdt {
         val nativeWorkspace = workspace
         val wasActive = activeEditor === editor
-        if (nativeWorkspace != null) {
-            refreshExecutionState(nativeWorkspace)
-        }
-        if (runningFile == editor.virtualFile && nativeWorkspace?.isTestRunning == true) {
-            nativeWorkspace.stopTest()
-            clearRunningState()
-        }
-
         if (activeEditor === editor) {
             if (!editor.project.isDisposed && editor.virtualFile.isValid) {
                 persist(editor, saveToDisk = true)
@@ -173,10 +183,12 @@ class JMeterWorkspaceService : Disposable {
             switchBlocked = false
         }
 
-        resultSessionIds.remove(editor.virtualFile)?.let { sessionId ->
-            nativeWorkspace?.discardResults(sessionId)
+        if (!(runInProgress() && runningFile == editor.virtualFile)) {
+            resultSessionIds.remove(editor.virtualFile)?.let { sessionId ->
+                nativeWorkspace?.discardResults(sessionId)
+            }
         }
-        if (wasActive && !editor.project.isDisposed) {
+        if (wasActive && !editor.project.isDisposed && !(runInProgress() && runningFile == editor.virtualFile)) {
             editor.project.getService(JMeterToolWindowController::class.java).showEmpty()
         }
     }
@@ -188,10 +200,7 @@ class JMeterWorkspaceService : Disposable {
         }
 
         val nativeWorkspace = workspace
-        if (nativeWorkspace != null) {
-            refreshExecutionState(nativeWorkspace)
-        }
-        documentUnsaved || (nativeWorkspace?.let(::nativeIsDirty) ?: false)
+        documentUnsaved || pendingVisualChange || (nativeWorkspace?.let(::nativeIsDirty) ?: false)
     }
 
     /** Called by IntelliJ before explicit Save, Save All, and autosave. */
@@ -284,7 +293,7 @@ class JMeterWorkspaceService : Disposable {
             .also { nativeWorkspace ->
                 nativeWorkspace.setModelChangeListener(Runnable {
                     if (!disposed) {
-                        fieldSnapshotTimer.restart()
+                        textAreaAdapters?.scanNow()
                     }
                 })
                 nativeWorkspace.setExecutionActionListener(ActionListener { event ->
@@ -307,6 +316,7 @@ class JMeterWorkspaceService : Disposable {
         val fingerprint = DocumentFingerprint.of(text)
         loadedFile = editor.virtualFile
         syncState = DocumentSyncState(fingerprint)
+        pendingVisualChange = false
         nativeMarkSaved(nativeWorkspace)
     }
 
@@ -387,6 +397,7 @@ class JMeterWorkspaceService : Disposable {
         }
         val fingerprint = DocumentFingerprint.of(editor.document.immutableCharSequence)
         (syncState ?: DocumentSyncState(fingerprint).also { syncState = it }).accept(fingerprint)
+        pendingVisualChange = false
         return true
     }
 
@@ -457,12 +468,14 @@ class JMeterWorkspaceService : Disposable {
                 endFieldEdit(editor)
             },
             onFieldChanged = {
+                pendingVisualChange = true
                 fieldSnapshotTimer.restart()
                 editor.refreshModifiedState()
             },
             onHistoryAction = { redo, focus ->
                 performHistoryAction(editor, redo, focus)
             },
+            onLanguageContextChanged = editor::showLanguageContext,
         )
     }
 
@@ -481,6 +494,7 @@ class JMeterWorkspaceService : Disposable {
         fieldSnapshotTimer.stop()
         if (activeEditor === editor && workspace != null) {
             synchronizeDocument(editor)
+            pendingVisualChange = false
         }
         fieldSnapshotTimer.stop()
         fieldEditGroup = null
@@ -490,6 +504,7 @@ class JMeterWorkspaceService : Disposable {
         val editor = activeEditor ?: return
         if (!disposed && workspace != null) {
             synchronizeDocument(editor)
+            pendingVisualChange = false
             fieldSnapshotTimer.stop()
             editor.refreshModifiedState()
         }
@@ -533,6 +548,7 @@ class JMeterWorkspaceService : Disposable {
         fieldSnapshotTimer.stop()
         val fingerprint = DocumentFingerprint.of(text)
         (syncState ?: DocumentSyncState(fingerprint).also { syncState = it }).accept(fingerprint)
+        pendingVisualChange = false
         textAreaAdapters?.restoreAfterHistory(focus)
         fieldEditGroup = Any()
         editor.refreshModifiedState()
@@ -544,18 +560,15 @@ class JMeterWorkspaceService : Disposable {
     private fun handleExecutionAction(actionCommand: String) {
         val editor = activeEditor ?: return
         val nativeWorkspace = workspace ?: return
-        when (actionCommand) {
-            RUN_SELECTED_THREAD_GROUPS -> runSelectedThreadGroups(editor, nativeWorkspace)
-            SHUTDOWN_TEST -> nativeWorkspace.shutdownTest()
-            STOP_TEST -> nativeWorkspace.stopTest()
+        val mode = JMeterRunMode.fromActionCommand(actionCommand) ?: return
+        if (runInProgress()) {
+            Messages.showInfoMessage(
+                editor.project,
+                "A JMeter process is already running for ${runningFile?.name ?: "another test plan"}.",
+                "JMeter Is Already Running",
+            )
+            return
         }
-        refreshExecutionState(nativeWorkspace)
-    }
-
-    private fun runSelectedThreadGroups(
-        editor: JMeterVisualFileEditor,
-        nativeWorkspace: JMeterWorkspace,
-    ) {
         if (!nativeWorkspace.canRunSelectedThreadGroups) {
             Messages.showInfoMessage(
                 editor.project,
@@ -568,33 +581,204 @@ class JMeterWorkspaceService : Disposable {
             return
         }
 
-        val sessionId = sessionIdFor(editor.virtualFile)
-        if (nativeWorkspace.startSelectedThreadGroups(sessionId)) {
-            runningFile = editor.virtualFile
-            runningEditor = editor
-            wasTestRunning = true
-            val controller = editor.project.getService(JMeterToolWindowController::class.java)
-            val toolWindow = ToolWindowManager.getInstance(editor.project).getToolWindow(JMETER_TOOL_WINDOW_ID)
-            if (toolWindow == null) {
-                controller.selectResultsTree()
-            } else {
-                toolWindow.activate(Runnable { controller.selectResultsTree() })
-            }
-        }
-    }
-
-    private fun refreshExecutionState(nativeWorkspace: JMeterWorkspace) {
-        val running = nativeWorkspace.isTestRunning
-        if (wasTestRunning && !running) {
-            clearRunningState()
-        }
-        wasTestRunning = running
+        val type = ConfigurationTypeUtil.findConfigurationType(JMeterRunConfigurationType::class.java)
+        val factory = type.configurationFactories.single()
+        val runManager = RunManager.getInstance(editor.project)
+        val settings = runManager.createConfiguration(
+            "JMeter: ${editor.virtualFile.nameWithoutExtension}",
+            factory,
+        )
+        (settings.configuration as JMeterRunConfiguration).runMode = mode
+        runManager.setTemporaryConfiguration(settings)
+        ProgramRunnerUtil.executeConfiguration(
+            settings,
+            DefaultRunExecutor.getRunExecutorInstance(),
+        )
     }
 
     private fun clearRunningState() {
         runningFile = null
         runningEditor = null
-        wasTestRunning = false
+        pendingRun = null
+        activeRun = null
+        activeProcess = null
+    }
+
+    internal fun prepareExternalRun(project: Project, mode: JMeterRunMode): JMeterLaunchRequest = onEdt {
+        check(!runInProgress()) { "Another JMeter process is already running." }
+        val editor = activeEditor
+            ?.takeIf { it.project === project && it.virtualFile.isValid }
+            ?: throw IllegalStateException(
+                "Open a JMX file in the JMeter visual editor and select one or more Thread Groups.",
+            )
+        val nativeWorkspace = workspace
+            ?: throw IllegalStateException("The JMeter visual workspace is not loaded.")
+        check(nativeWorkspace.canRunSelectedThreadGroups) {
+            "Select one or more Thread Groups in the JMeter tree before running."
+        }
+        check(persist(editor, saveToDisk = true)) { "The JMX file could not be saved before running." }
+
+        val installation = ApplicationManager.getApplication()
+            .getService(JMeterRuntimeService::class.java)
+            .configuredInstallation()
+        val commandPrefix = installation.commandLinePrefix(SystemInfo.isWindows)
+        val sourcePath = editor.virtualFile.toNioPath().toAbsolutePath().normalize()
+        val sourceDirectory = sourcePath.parent
+            ?: throw IllegalStateException("The JMX file has no parent directory: $sourcePath")
+        val restrictedPlan = Files.createTempFile(sourceDirectory, ".jmeter-idea-", ".jmx")
+        val journal = Files.createTempFile(sourceDirectory, ".jmeter-idea-", ".results")
+        val logFile = Files.createTempFile(sourceDirectory, ".jmeter-idea-", ".log")
+        val token = UUID.randomUUID().toString().replace("-", "")
+        var bridge: JMeterResultBridge? = null
+        try {
+            val sessionId = sessionIdFor(editor.virtualFile)
+            bridge = JMeterResultBridge(token, journal) { sample ->
+                enqueueExternalSample(editor.virtualFile, sessionId, sample)
+            }
+            val jmx = nativeWorkspace.snapshotSelectedThreadGroups(
+                mode.actionCommand,
+                bridge.port,
+                token,
+                journal,
+            ) ?: throw IllegalStateException(
+                "Select one or more Thread Groups in the JMeter tree before running.",
+            )
+            Files.write(
+                restrictedPlan,
+                jmx,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE,
+            )
+
+            val commandLine = GeneralCommandLine(commandPrefix.first())
+                .withParameters(*commandPrefix.drop(1).toTypedArray())
+                .withParameters(
+                    "-n",
+                    "-t",
+                    restrictedPlan.toString(),
+                    "-j",
+                    logFile.toString(),
+                )
+                .withWorkDirectory(sourceDirectory.toFile())
+                .withCharset(StandardCharsets.UTF_8)
+            val request = JMeterLaunchRequest(
+                commandLine = commandLine,
+                ownerFile = editor.virtualFile,
+                sessionId = sessionId,
+                restrictedPlan = restrictedPlan,
+                logFile = logFile,
+                bridge = bridge,
+            )
+            pendingRun = request
+            runningFile = editor.virtualFile
+            runningEditor = editor
+            request
+        } catch (failure: Throwable) {
+            bridge?.close()
+            deleteRunFile(restrictedPlan)
+            deleteRunFile(journal)
+            deleteRunFile(logFile)
+            throw failure
+        }
+    }
+
+    internal fun bindExternalProcess(request: JMeterLaunchRequest, handler: ProcessHandler) = onEdt {
+        check(pendingRun === request) { "The prepared JMeter run is no longer active." }
+        pendingRun = null
+        activeRun = request
+        activeProcess = handler
+        handler.addProcessListener(object : ProcessAdapter() {
+            override fun processTerminated(event: ProcessEvent) {
+                finishExternalRun(request)
+            }
+        })
+        showResultsForRunningFile()
+    }
+
+    internal fun abortExternalRun(request: JMeterLaunchRequest) = onEdt {
+        if (pendingRun === request || activeRun === request) {
+            request.bridge.close()
+            cleanupRunFiles(request)
+            clearRunningState()
+        }
+    }
+
+    private fun finishExternalRun(request: JMeterLaunchRequest) {
+        AppExecutorUtil.getAppExecutorService().execute {
+            try {
+                request.bridge.finishAndReplayJournal()
+            } catch (failure: Exception) {
+                LOG.warn("Unable to replay the JMeter live-result journal", failure)
+            } finally {
+                cleanupRunFiles(request)
+                ApplicationManager.getApplication().invokeLater {
+                    if (activeRun === request || pendingRun === request) {
+                        clearRunningState()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun enqueueExternalSample(file: VirtualFile, sessionId: String, sample: ByteArray) {
+        pendingSamples.add(ExternalSample(file, sessionId, sample))
+        if (sampleDrainScheduled.compareAndSet(false, true)) {
+            ApplicationManager.getApplication().invokeLater(::drainExternalSamples)
+        }
+    }
+
+    private fun drainExternalSamples() {
+        var count = 0
+        while (count < MAX_SAMPLES_PER_EDT_BATCH) {
+            val sample = pendingSamples.poll() ?: break
+            if (sample.file == runningFile || sample.file == loadedFile) {
+                try {
+                    workspace?.appendSampleResult(sample.sessionId, sample.payload)
+                } catch (failure: Exception) {
+                    LOG.warn("Unable to add an external JMeter sample to the native result views", failure)
+                }
+            }
+            count++
+        }
+        sampleDrainScheduled.set(false)
+        if (pendingSamples.isNotEmpty() && sampleDrainScheduled.compareAndSet(false, true)) {
+            ApplicationManager.getApplication().invokeLater(::drainExternalSamples)
+        }
+    }
+
+    private fun showResultsForRunningFile() {
+        val editor = runningEditor ?: return
+        val controller = editor.project.getService(JMeterToolWindowController::class.java)
+        val toolWindow = ToolWindowManager.getInstance(editor.project).getToolWindow(JMETER_TOOL_WINDOW_ID)
+        if (toolWindow == null) {
+            controller.selectResultsTree()
+        } else {
+            toolWindow.activate(Runnable { controller.selectResultsTree() })
+        }
+    }
+
+    private fun runInProgress(): Boolean = pendingRun != null || activeRun != null
+
+    private fun notifyRunPinned(project: Project, message: String) {
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup(NOTIFICATION_GROUP_ID)
+            .createNotification(message, NotificationType.INFORMATION)
+            .notify(project)
+    }
+
+    private fun cleanupRunFiles(request: JMeterLaunchRequest) {
+        request.bridge.close()
+        deleteRunFile(request.restrictedPlan)
+        deleteRunFile(request.bridge.journalPath)
+        deleteRunFile(request.logFile)
+    }
+
+    private fun deleteRunFile(path: java.nio.file.Path) {
+        try {
+            Files.deleteIfExists(path)
+        } catch (failure: Exception) {
+            LOG.debug("Unable to delete temporary JMeter run file $path", failure)
+        }
     }
 
     private fun scheduleSavedBaseline(editor: JMeterVisualFileEditor) {
@@ -621,7 +805,9 @@ class JMeterWorkspaceService : Disposable {
         fieldSnapshotTimer.stop()
         textAreaAdapters?.dispose()
         textAreaAdapters = null
+        editor.showLanguageContext(null)
         fieldEditGroup = null
+        pendingVisualChange = false
         workspace?.component?.let(editor::detachNative)
         if (!editor.project.isDisposed && runningFile == null) {
             editor.project.getService(JMeterToolWindowController::class.java).showEmpty()
@@ -686,6 +872,10 @@ class JMeterWorkspaceService : Disposable {
         }
         disposed = true
         onEdt {
+            activeProcess?.takeIf { !it.isProcessTerminated }?.destroyProcess()
+            pendingRun?.let(::cleanupRunFiles)
+            activeRun?.let(::cleanupRunFiles)
+            pendingSamples.clear()
             fieldSnapshotTimer.stop()
             textAreaAdapters?.dispose()
             textAreaAdapters = null
@@ -707,12 +897,18 @@ class JMeterWorkspaceService : Disposable {
         CANCEL,
     }
 
+    private data class ExternalSample(
+        val file: VirtualFile,
+        val sessionId: String,
+        val payload: ByteArray,
+    )
+
     private companion object {
+        val LOG: Logger = Logger.getInstance(JMeterWorkspaceService::class.java)
         const val FIELD_SNAPSHOT_DELAY_MS = 250
+        const val MAX_SAMPLES_PER_EDT_BATCH = 32
         const val JMX_EDIT_COMMAND_NAME = "Edit JMeter Test Plan"
-        const val RUN_SELECTED_THREAD_GROUPS = "jmeter.run.selected.thread.groups"
-        const val SHUTDOWN_TEST = "jmeter.shutdown.test"
-        const val STOP_TEST = "jmeter.stop.test"
         const val JMETER_TOOL_WINDOW_ID = "JMeter"
+        const val NOTIFICATION_GROUP_ID = "JMeter"
     }
 }

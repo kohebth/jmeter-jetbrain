@@ -20,6 +20,8 @@
                 extensions="jmx"/>
         <fileEditorProvider
                 implementation="com.github.kohebth.jmeterviewer.ide.JMeterFileEditorProvider"/>
+        <configurationType
+                implementation="com.github.kohebth.jmeterviewer.execution.JMeterRunConfigurationType"/>
         <applicationService
                 serviceImplementation="com.github.kohebth.jmeterviewer.runtime.JMeterRuntimeService"/>
         <applicationService
@@ -42,5 +44,9 @@
                 implementation="com.github.kohebth.jmeterviewer.editor.JMeterDocumentSynchronizationVetoer"/>
         <fileDocumentManagerListener
                 implementation="com.github.kohebth.jmeterviewer.editor.JMeterFileDocumentListener"/>
+        <notificationGroup
+                id="JMeter"
+                displayType="BALLOON"
+                isLogByDefault="true"/>
     </extensions>
 </idea-plugin>

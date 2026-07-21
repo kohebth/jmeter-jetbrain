@@ -112,6 +112,9 @@ val prepareJMeterTestHome by tasks.registering(Sync::class) {
             "user.properties",
             "system.properties",
             "log4j2.xml",
+            "jmeter",
+            "jmeter.sh",
+            "jmeter.bat",
         )
         into("bin")
     }

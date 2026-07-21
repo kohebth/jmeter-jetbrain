@@ -21,6 +21,24 @@ class EmbeddedJMeterWorkspaceContractTest {
                 api.getMethod("load", InputStream::class.java, Path::class.java).returnType,
             )
             assertEquals(ByteArray::class.java, api.getMethod("snapshot").returnType)
+            assertEquals(
+                ByteArray::class.java,
+                api.getMethod(
+                    "snapshotSelectedThreadGroups",
+                    String::class.java,
+                    Int::class.javaPrimitiveType,
+                    String::class.java,
+                    Path::class.java,
+                ).returnType,
+            )
+            assertEquals(
+                Void.TYPE,
+                api.getMethod(
+                    "appendSampleResult",
+                    String::class.java,
+                    ByteArray::class.java,
+                ).returnType,
+            )
             assertEquals(Boolean::class.javaPrimitiveType, api.getMethod("isDirty").returnType)
             assertEquals(Void.TYPE, api.getMethod("markSaved").returnType)
             assertEquals(JComponent::class.java, api.getMethod("getOutlineComponent").returnType)

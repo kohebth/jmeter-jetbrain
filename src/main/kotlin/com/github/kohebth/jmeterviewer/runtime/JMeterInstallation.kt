@@ -18,6 +18,32 @@ internal data class JMeterInstallation private constructor(
     val propertiesFile: Path = home.resolve("bin/jmeter.properties")
     val saveServicePropertiesFile: Path = home.resolve("bin/saveservice.properties")
 
+    fun commandLineLauncher(isWindows: Boolean): Path {
+        val bin = home.resolve("bin")
+        val candidates = if (isWindows) {
+            listOf("jmeter.bat", "jmeter.cmd")
+        } else {
+            listOf("jmeter", "jmeter.sh")
+        }
+        return candidates.asSequence()
+            .map(bin::resolve)
+            .firstOrNull(Files::isRegularFile)
+            ?: throw JMeterConfigurationException(
+                "The configured JMeter installation does not contain ${candidates.joinToString(" or ")} in $bin.",
+            )
+    }
+
+    fun commandLinePrefix(isWindows: Boolean): List<String> {
+        val launcher = commandLineLauncher(isWindows).toString()
+        if (!isWindows) {
+            return listOf(launcher)
+        }
+        val commandInterpreter = System.getenv("ComSpec")
+            ?.takeIf(String::isNotBlank)
+            ?: "cmd.exe"
+        return listOf(commandInterpreter, "/d", "/c", "call", launcher)
+    }
+
     companion object {
         const val SUPPORTED_VERSION: String = "5.6.3"
         private val SUPPORTED_CORE_JAR_NAMES = setOf(

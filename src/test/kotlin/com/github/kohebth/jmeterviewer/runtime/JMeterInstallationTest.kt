@@ -25,6 +25,16 @@ class JMeterInstallationTest {
         assertEquals(JMeterInstallation.SUPPORTED_VERSION, installation.version)
         assertEquals(files.launcher, installation.launcherJar)
         assertEquals(files.core, installation.coreJar)
+        assertEquals(home.resolve("bin/jmeter").toAbsolutePath(), installation.commandLineLauncher(false))
+        assertEquals(home.resolve("bin/jmeter.bat").toAbsolutePath(), installation.commandLineLauncher(true))
+        assertEquals(
+            listOf(home.resolve("bin/jmeter").toAbsolutePath().toString()),
+            installation.commandLinePrefix(false),
+        )
+        assertEquals(
+            listOf("/d", "/c", "call", home.resolve("bin/jmeter.bat").toAbsolutePath().toString()),
+            installation.commandLinePrefix(true).drop(1),
+        )
         assertEquals(
             listOf(files.launcher, library, files.core, extension, junit),
             installation.runtimeJars,
@@ -92,6 +102,8 @@ class JMeterInstallationTest {
         Files.createDirectories(home.resolve("lib/junit"))
         Files.writeString(bin.resolve("jmeter.properties"), "# test\n")
         Files.writeString(bin.resolve("saveservice.properties"), "_version=5.0\n")
+        Files.writeString(bin.resolve("jmeter"), "#!/bin/sh\n")
+        Files.writeString(bin.resolve("jmeter.bat"), "@echo off\r\n")
         val launcher = versionedJar(bin.resolve("ApacheJMeter.jar"), version)
         val core = emptyJar(home.resolve("lib/ext/$coreName"))
         return InstallationFiles(launcher, core)

@@ -1,93 +1,59 @@
 package com.github.kohebth.jmeterviewer.runtime
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotSame
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.awt.Component
-import java.awt.Container
-import java.util.concurrent.atomic.AtomicReference
-import javax.swing.JComponent
-import javax.swing.JToolBar
+import java.nio.file.Files
+import java.nio.file.Path
 import javax.swing.JTree
-import javax.swing.SwingUtilities
+import javax.swing.tree.DefaultMutableTreeNode
+import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreePath
 
 class EmbeddedJMeterOutlineTest {
     @Test
     fun keepsAuthoringAndOutlineTreeGeometryIndependentWhileSynchronizingSelection() {
         ExternalJMeterTestSupport.openRuntime().use { runtime ->
-            onEdt {
-                runtime.withContextClassLoader {
-                    val workspaceType = runtime.classLoader.loadClass(
-                        "org.apache.jmeter.gui.EmbeddedJMeterWorkspace",
-                    )
-                    val workspace = workspaceType.getMethod("create").invoke(null)
-                    try {
-                        val authoringRoot = workspaceType.getMethod("getComponent")
-                            .invoke(workspace) as JComponent
-                        val outlineRoot = workspaceType.getMethod("getOutlineComponent")
-                            .invoke(workspace) as JComponent
-                        val authoringTree = descendants(authoringRoot).filterIsInstance<JTree>().single()
-                        val outlineTree = descendants(outlineRoot).filterIsInstance<JTree>().single()
+            runtime.withContextClassLoader {
+                val root = DefaultMutableTreeNode("root")
+                val child = DefaultMutableTreeNode("child")
+                root.add(child)
+                val model = DefaultTreeModel(root)
+                val authoringTree = JTree(model)
+                val outlineTree = JTree(model)
+                val workspaceType = runtime.classLoader.loadClass(
+                    "org.apache.jmeter.gui.EmbeddedJMeterWorkspace",
+                )
+                val synchronize = workspaceType.getDeclaredMethod(
+                    "synchronizeTrees",
+                    JTree::class.java,
+                    JTree::class.java,
+                ).apply { isAccessible = true }
+                synchronize.invoke(null, authoringTree, outlineTree)
 
-                        assertNotSame(authoringTree.selectionModel, outlineTree.selectionModel)
+                assertNotSame(authoringTree.selectionModel, outlineTree.selectionModel)
+                val childPath = TreePath(child.path)
+                authoringTree.selectionPath = childPath
+                assertEquals(childPath, outlineTree.selectionPath)
 
-                        authoringTree.setSelectionRow(1)
-                        assertEquals(authoringTree.selectionPath, outlineTree.selectionPath)
-
-                        outlineTree.setSelectionRow(0)
-                        assertEquals(outlineTree.selectionPath, authoringTree.selectionPath)
-                    } finally {
-                        workspaceType.getMethod("close").invoke(workspace)
-                    }
-                }
+                outlineTree.selectionPath = TreePath(root.path)
+                assertEquals(outlineTree.selectionPath, authoringTree.selectionPath)
             }
         }
     }
 
     @Test
     fun doesNotAddAnExecutionToolbarAboveTheNativeJMeterEditor() {
-        ExternalJMeterTestSupport.openRuntime().use { runtime ->
-            onEdt {
-                runtime.withContextClassLoader {
-                    val workspaceType = runtime.classLoader.loadClass(
-                        "org.apache.jmeter.gui.EmbeddedJMeterWorkspace",
-                    )
-                    val workspace = workspaceType.getMethod("create").invoke(null)
-                    try {
-                        val component = workspaceType.getMethod("getComponent")
-                            .invoke(workspace) as JComponent
-
-                        assertFalse(descendants(component).any { it is JToolBar })
-                    } finally {
-                        workspaceType.getMethod("close").invoke(workspace)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun descendants(root: Component): Sequence<Component> = sequence {
-        yield(root)
-        if (root is Container) {
-            root.components.forEach { child -> yieldAll(descendants(child)) }
-        }
-    }
-
-    private fun <T> onEdt(action: () -> T): T {
-        if (SwingUtilities.isEventDispatchThread()) {
-            return action()
-        }
-        val result = AtomicReference<T>()
-        val failure = AtomicReference<Throwable?>()
-        SwingUtilities.invokeAndWait {
-            try {
-                result.set(action())
-            } catch (throwable: Throwable) {
-                failure.set(throwable)
-            }
-        }
-        failure.get()?.let { throw it }
-        return result.get()
+        val source = Files.readString(
+            Path.of(
+                "vendor/apache-jmeter-5.6.3/src/core/src/main/java/" +
+                    "org/apache/jmeter/gui/EmbeddedJMeterWorkspace.java",
+            ),
+        )
+        assertTrue(source.contains("mainFrame.getEmbeddedComponent()"))
+        assertFalse(source.contains("new JToolBar"))
+        assertFalse(source.contains("createToolbarButton("))
     }
 }

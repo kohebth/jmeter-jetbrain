@@ -18,6 +18,7 @@
 package org.apache.jmeter.gui.action;
 
 import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -91,11 +92,22 @@ public class Start extends AbstractAction {
     }
 
     private StandardJMeterEngine engine;
+    private ActionListener selectedThreadGroupRunListener;
 
     /**
      * Constructor for the Start object.
      */
     public Start() {
+    }
+
+    /**
+     * Route native selected-thread-group menu commands to an embedding host.
+     * A {@code null} listener restores JMeter's in-process execution.
+     *
+     * @param listener embedding callback, or {@code null}
+     */
+    public void setSelectedThreadGroupRunListener(ActionListener listener) {
+        selectedThreadGroupRunListener = listener;
     }
 
     /**
@@ -131,6 +143,10 @@ public class Start extends AbstractAction {
         } else if (e.getActionCommand().equals(ActionNames.RUN_TG)
                 || e.getActionCommand().equals(ActionNames.RUN_TG_NO_TIMERS)
                 || e.getActionCommand().equals(ActionNames.VALIDATE_TG)) {
+            if (selectedThreadGroupRunListener != null) {
+                selectedThreadGroupRunListener.actionPerformed(e);
+                return;
+            }
             popupShouldSave(e);
             boolean noTimers = e.getActionCommand().equals(ActionNames.RUN_TG_NO_TIMERS);
             boolean isValidation = e.getActionCommand().equals(ActionNames.VALIDATE_TG);
@@ -205,6 +221,47 @@ public class Start extends AbstractAction {
         }
         startEngine(threadGroups, RunMode.AS_IS, transientListeners, false);
         return engine != null && engine.isActive();
+    }
+
+    /**
+     * Build a detached execution tree for the selected thread groups. This is
+     * used by embedding hosts that execute JMeter in an IDE-managed process.
+     *
+     * @param actionCommand one of the native selected-thread-group commands
+     * @param transientListeners listeners added only to the detached tree
+     * @return detached tree, or {@code null} when no thread group is selected
+     */
+    public HashTree createSelectedThreadGroupsTree(
+            String actionCommand,
+            List<TestElement> transientListeners) {
+        JMeterTreeNode[] nodes = GuiPackage.getInstance().getTreeListener().getSelectedNodes();
+        nodes = Copy.keepOnlyAncestors(nodes);
+        AbstractThreadGroup[] threadGroups = keepOnlyThreadGroups(nodes);
+        if (threadGroups.length == 0) {
+            return null;
+        }
+
+        HashTree source = GuiPackage.getInstance().getTreeModel().getTestPlan();
+        HashTree treeToUse = JMeter.convertSubTree(source, false);
+        keepOnlySelectedThreadGroupsInHashTree(treeToUse, threadGroups);
+        Object testPlan = treeToUse.getArray()[0];
+        for (TestElement listener : transientListeners) {
+            treeToUse.add(testPlan, listener);
+        }
+        return cloneTree(treeToUse, runModeFor(actionCommand));
+    }
+
+    private static RunMode runModeFor(String actionCommand) {
+        if (ActionNames.RUN_TG_NO_TIMERS.equals(actionCommand)) {
+            return RunMode.IGNORING_TIMERS;
+        }
+        if (ActionNames.VALIDATE_TG.equals(actionCommand)) {
+            return RunMode.VALIDATION;
+        }
+        if (ActionNames.RUN_TG.equals(actionCommand)) {
+            return RunMode.AS_IS;
+        }
+        throw new IllegalArgumentException("Unsupported selected-thread-group command: " + actionCommand);
     }
 
     /** Request an orderly stop of the active embedded test. */

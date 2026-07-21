@@ -5,22 +5,41 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.undo.UndoUtil
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.fileTypes.FileType
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFileFactory
+import com.intellij.psi.codeStyle.CodeStyleManager
 import java.awt.Component
 import java.awt.Container
+import java.awt.Dimension
 import java.awt.KeyboardFocusManager
 import java.awt.KeyEventDispatcher
+import java.awt.Rectangle
+import java.awt.event.ContainerAdapter
+import java.awt.event.ContainerEvent
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
+import java.awt.event.HierarchyEvent
+import java.awt.event.HierarchyListener
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
+import java.awt.event.MouseWheelEvent
+import java.awt.event.MouseWheelListener
+import java.util.Collections
 import java.util.IdentityHashMap
 import javax.swing.JComponent
+import javax.swing.JPanel
+import javax.swing.JScrollPane
 import javax.swing.JTextArea
 import javax.swing.JViewport
+import javax.swing.Scrollable
+import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.event.DocumentEvent as SwingDocumentEvent
@@ -36,6 +55,13 @@ internal data class JMeterFieldFocus(
     val nativeComponent: JTextComponent? = null,
 )
 
+internal data class JMeterLanguageContext(
+    val languages: List<JMeterEditorLanguage>,
+    val selected: JMeterEditorLanguage,
+    val selectLanguage: (JMeterEditorLanguage) -> Unit,
+    val reformat: () -> Unit,
+)
+
 /**
  * Replaces visible persistent JMeter text areas with short-lived IntelliJ
  * editors. Their documents have undo disabled; the backing JMX document owns
@@ -48,11 +74,14 @@ internal class JMeterTextAreaAdapters(
     private val onFocusEnded: () -> Unit,
     private val onFieldChanged: () -> Unit,
     private val onHistoryAction: (redo: Boolean, focus: JMeterFieldFocus) -> Unit,
+    private val onLanguageContextChanged: (JMeterLanguageContext?) -> Unit,
 ) : Disposable {
     private val editorFactory = EditorFactory.getInstance()
     private val adapters = IdentityHashMap<JTextComponent, TextAreaAdapter>()
     private val nativeFields = IdentityHashMap<JTextComponent, NativeFieldTracker>()
-    private val scanTimer = Timer(SCAN_INTERVAL_MS) { scan() }
+    private val reconcileTimer = Timer(0) { scan() }
+    private val observedContainers = identitySet<Container>()
+    private val observedRoots = identitySet<JComponent>()
     private var orderedAdapters: List<TextAreaAdapter> = emptyList()
     private var activeAdapter: TextAreaAdapter? = null
     private var activeNativeField: NativeFieldTracker? = null
@@ -62,16 +91,29 @@ internal class JMeterTextAreaAdapters(
     private val keyDispatcher = KeyEventDispatcher { event ->
         dispatchHistoryShortcut(event)
     }
+    private val containerListener = object : ContainerAdapter() {
+        override fun componentAdded(event: ContainerEvent) = scheduleScan()
+
+        override fun componentRemoved(event: ContainerEvent) = scheduleScan()
+    }
+    private val hierarchyListener = HierarchyListener { event ->
+        if (event.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L) {
+            scheduleScan()
+        }
+    }
 
     init {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keyDispatcher)
-        scanTimer.isRepeats = true
-        scanTimer.start()
+        reconcileTimer.isRepeats = false
         scan()
     }
 
     fun scanNow() {
-        scan()
+        if (SwingUtilities.isEventDispatchThread()) {
+            scan()
+        } else {
+            ApplicationManager.getApplication().invokeLater(::scan)
+        }
     }
 
     fun restoreAfterHistory(focus: JMeterFieldFocus) {
@@ -98,9 +140,13 @@ internal class JMeterTextAreaAdapters(
 
         val found = mutableListOf<TextAreaAdapter>()
         val foundNativeFields = mutableListOf<NativeFieldTracker>()
-        roots().filter { it.isShowing }.forEach {
-            collectAdapters(it, found, foundNativeFields)
+        val foundContainers = identitySet<Container>()
+        val currentRoots = roots().toList()
+        updateObservedRoots(currentRoots)
+        currentRoots.filter { it.isShowing }.forEach {
+            collectAdapters(it, found, foundNativeFields, foundContainers)
         }
+        updateObservedContainers(foundContainers)
         adapters.values.toList()
             .filterNot(found::contains)
             .forEach(TextAreaAdapter::dispose)
@@ -117,6 +163,7 @@ internal class JMeterTextAreaAdapters(
         component: Component,
         found: MutableList<TextAreaAdapter>,
         foundNativeFields: MutableList<NativeFieldTracker>,
+        foundContainers: MutableSet<Container>,
     ) {
         if (!component.isShowing) {
             return
@@ -127,6 +174,9 @@ internal class JMeterTextAreaAdapters(
                 found.add(mounted)
                 return
             }
+        }
+        if (component is Container) {
+            foundContainers.add(component)
         }
 
         if (component is JTextArea && JMeterTextAreaPolicy.canAdapt(component)) {
@@ -147,8 +197,45 @@ internal class JMeterTextAreaAdapters(
 
         if (component is Container) {
             component.components.toList().forEach { child ->
-                collectAdapters(child, found, foundNativeFields)
+                collectAdapters(child, found, foundNativeFields, foundContainers)
             }
+        }
+    }
+
+    private fun scheduleScan() {
+        if (disposed) {
+            return
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            reconcileTimer.restart()
+        } else {
+            ApplicationManager.getApplication().invokeLater {
+                if (!disposed) {
+                    reconcileTimer.restart()
+                }
+            }
+        }
+    }
+
+    private fun updateObservedRoots(currentRoots: Collection<JComponent>) {
+        observedRoots.toList().filterNot(currentRoots::contains).forEach { root ->
+            root.removeHierarchyListener(hierarchyListener)
+            observedRoots.remove(root)
+        }
+        currentRoots.filterNot(observedRoots::contains).forEach { root ->
+            root.addHierarchyListener(hierarchyListener)
+            observedRoots.add(root)
+        }
+    }
+
+    private fun updateObservedContainers(current: Set<Container>) {
+        observedContainers.toList().filterNot(current::contains).forEach { container ->
+            container.removeContainerListener(containerListener)
+            observedContainers.remove(container)
+        }
+        current.filterNot(observedContainers::contains).forEach { container ->
+            container.addContainerListener(containerListener)
+            observedContainers.add(container)
         }
     }
 
@@ -169,6 +256,7 @@ internal class JMeterTextAreaAdapters(
         activeAdapter = adapter
         activeNativeField = null
         onFocusStarted()
+        onLanguageContextChanged(adapter.languageContext())
     }
 
     private fun activate(tracker: NativeFieldTracker) {
@@ -181,6 +269,7 @@ internal class JMeterTextAreaAdapters(
         activeAdapter = null
         activeNativeField = tracker
         onFocusStarted()
+        onLanguageContextChanged(null)
     }
 
     private fun deactivate(adapter: TextAreaAdapter) {
@@ -191,6 +280,7 @@ internal class JMeterTextAreaAdapters(
             val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
             if (focusOwner == null || !SwingUtilities.isDescendingFrom(focusOwner, adapter.editor.component)) {
                 activeAdapter = null
+                onLanguageContextChanged(null)
                 onFocusEnded()
             }
         }
@@ -255,11 +345,16 @@ internal class JMeterTextAreaAdapters(
             return
         }
         disposed = true
-        scanTimer.stop()
+        reconcileTimer.stop()
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(keyDispatcher)
+        observedRoots.forEach { it.removeHierarchyListener(hierarchyListener) }
+        observedRoots.clear()
+        observedContainers.forEach { it.removeContainerListener(containerListener) }
+        observedContainers.clear()
         if (activeAdapter != null || activeNativeField != null) {
             activeAdapter = null
             activeNativeField = null
+            onLanguageContextChanged(null)
             onFocusEnded()
         }
         adapters.values.toList().forEach(TextAreaAdapter::dispose)
@@ -329,11 +424,24 @@ internal class JMeterTextAreaAdapters(
         val editor: Editor
         var slot: Int = -1
         private val viewport = source.parent as JViewport
-        private val ideDocument = editorFactory.createDocument(source.text)
+        private val outerScrollPane = viewport.parent as? JScrollPane
+        private val syntaxStyle = source.javaClass.methods
+            .firstOrNull { it.name == "getSyntaxEditingStyle" && it.parameterCount == 0 }
+            ?.let { method -> runCatching { method.invoke(source) as? String }.getOrNull() }
+        private var language = JMeterSyntaxLanguage.resolve(
+            syntaxStyle,
+            source.getClientProperty(LANGUAGE_OVERRIDE_PROPERTY) as? String,
+        )
+        private val ideDocument = createLanguageDocument(language.fileType)
         private val discardAllEditsMethod = source.javaClass.methods
             .firstOrNull { it.name == "discardAllEdits" && it.parameterCount == 0 }
         private var syncing = false
         private var released = false
+        private val editorHost: JComponent
+        private var editorScrollPane: JScrollPane? = null
+        private val oldVerticalPolicy = outerScrollPane?.verticalScrollBarPolicy
+        private val oldHorizontalPolicy = outerScrollPane?.horizontalScrollBarPolicy
+        private val wheelForwarder = MouseWheelListener(::forwardWheelAtBoundary)
 
         private val ideDocumentListener = object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
@@ -353,11 +461,12 @@ internal class JMeterTextAreaAdapters(
 
         init {
             UndoUtil.disableUndoFor(ideDocument)
-            editor = if (source.isEditable) {
-                editorFactory.createEditor(ideDocument, project)
-            } else {
-                editorFactory.createViewer(ideDocument, project)
-            }
+            editor = editorFactory.createEditor(
+                ideDocument,
+                project,
+                language.fileType,
+                !source.isEditable,
+            )
             editor.settings.apply {
                 isLineNumbersShown = false
                 isFoldingOutlineShown = false
@@ -365,7 +474,9 @@ internal class JMeterTextAreaAdapters(
                 additionalLinesCount = 0
                 isUseSoftWraps = source.lineWrap
             }
-            editor.component.putClientProperty(ADAPTER_PROPERTY, this)
+            editorHost = ViewportEditorHost(editor.component).apply {
+                putClientProperty(ADAPTER_PROPERTY, this@TextAreaAdapter)
+            }
             ideDocument.addDocumentListener(ideDocumentListener)
             source.document.addDocumentListener(swingDocumentListener)
             source.actionMap.remove("undo")
@@ -375,7 +486,14 @@ internal class JMeterTextAreaAdapters(
 
                 override fun focusLost(event: FocusEvent) = deactivate(this@TextAreaAdapter)
             })
-            viewport.view = editor.component
+            outerScrollPane?.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
+            outerScrollPane?.horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            viewport.view = editorHost
+            editorScrollPane = SwingUtilities.getAncestorOfClass(
+                JScrollPane::class.java,
+                editor.contentComponent,
+            ) as? JScrollPane
+            editorScrollPane?.addMouseWheelListener(wheelForwarder)
             discardNativeHistory()
         }
 
@@ -397,6 +515,50 @@ internal class JMeterTextAreaAdapters(
             editor.selectionModel.setSelection(start, end)
             editor.contentComponent.requestFocusInWindow()
         }
+
+        fun languageContext(): JMeterLanguageContext = JMeterLanguageContext(
+            languages = JMeterSyntaxLanguage.installedLanguages(),
+            selected = language,
+            selectLanguage = ::selectLanguage,
+            reformat = ::reformat,
+        )
+
+        private fun selectLanguage(selected: JMeterEditorLanguage) {
+            if (released || selected.fileType == language.fileType) {
+                return
+            }
+            language = selected
+            source.putClientProperty(LANGUAGE_OVERRIDE_PROPERTY, selected.extension)
+            (editor as? EditorEx)?.highlighter = EditorHighlighterFactory.getInstance()
+                .createEditorHighlighter(project, selected.fileType)
+            onLanguageContextChanged(languageContext())
+        }
+
+        private fun reformat() {
+            if (released || !source.isEditable) {
+                return
+            }
+            val temporaryFile = PsiFileFactory.getInstance(project).createFileFromText(
+                "jmeter-field.${language.extension}",
+                language.fileType,
+                ideDocument.immutableCharSequence,
+            )
+            ApplicationManager.getApplication().runWriteAction {
+                CodeStyleManager.getInstance(project).reformat(temporaryFile)
+            }
+            val formatted = temporaryFile.text
+            if (formatted != ideDocument.text) {
+                ApplicationManager.getApplication().runWriteAction {
+                    ideDocument.setText(formatted)
+                }
+            }
+        }
+
+        private fun createLanguageDocument(fileType: FileType) =
+            PsiFileFactory.getInstance(project)
+                .createFileFromText("jmeter-field.${language.extension}", fileType, source.text)
+                .let { psiFile -> PsiDocumentManager.getInstance(project).getDocument(psiFile) }
+                ?: editorFactory.createDocument(source.text)
 
         private fun syncToSwing() {
             val replacement = TextReplacement.between(source.text, ideDocument.immutableCharSequence)
@@ -464,6 +626,51 @@ internal class JMeterTextAreaAdapters(
             }
         }
 
+        private fun forwardWheelAtBoundary(event: MouseWheelEvent) {
+            if (event.isConsumed || event.wheelRotation == 0 || event.isShiftDown) {
+                return
+            }
+            val editorPane = editorScrollPane ?: return
+            val model = editorPane.verticalScrollBar.model
+            val atStart = event.wheelRotation < 0 && model.value <= model.minimum
+            val atEnd = event.wheelRotation > 0 && model.value + model.extent >= model.maximum
+            if (!atStart && !atEnd) {
+                return
+            }
+            val ancestor = ancestorScrollPane() ?: return
+            val point = SwingUtilities.convertPoint(event.component, event.point, ancestor)
+            ancestor.dispatchEvent(
+                MouseWheelEvent(
+                    ancestor,
+                    event.id,
+                    event.`when`,
+                    event.modifiersEx,
+                    point.x,
+                    point.y,
+                    event.xOnScreen,
+                    event.yOnScreen,
+                    event.clickCount,
+                    event.isPopupTrigger,
+                    event.scrollType,
+                    event.scrollAmount,
+                    event.wheelRotation,
+                    event.preciseWheelRotation,
+                ),
+            )
+            event.consume()
+        }
+
+        private fun ancestorScrollPane(): JScrollPane? {
+            var current: Component? = outerScrollPane?.parent
+            while (current != null) {
+                if (current is JScrollPane && current !== outerScrollPane && current !== editorScrollPane) {
+                    return current
+                }
+                current = current.parent
+            }
+            return null
+        }
+
         fun dispose() {
             if (released) {
                 return
@@ -471,15 +678,23 @@ internal class JMeterTextAreaAdapters(
             released = true
             if (activeAdapter === this) {
                 activeAdapter = null
+                onLanguageContextChanged(null)
                 onFocusEnded()
             }
             syncToSwing()
+            editorScrollPane?.removeMouseWheelListener(wheelForwarder)
             source.document.removeDocumentListener(swingDocumentListener)
             ideDocument.removeDocumentListener(ideDocumentListener)
-            if (viewport.view === editor.component) {
+            if (viewport.view === editorHost) {
                 viewport.view = source
             }
-            editor.component.putClientProperty(ADAPTER_PROPERTY, null)
+            if (oldVerticalPolicy != null) {
+                outerScrollPane?.verticalScrollBarPolicy = oldVerticalPolicy
+            }
+            if (oldHorizontalPolicy != null) {
+                outerScrollPane?.horizontalScrollBarPolicy = oldHorizontalPolicy
+            }
+            editorHost.putClientProperty(ADAPTER_PROPERTY, null)
             editorFactory.releaseEditor(editor)
             adapters.remove(source)
             discardNativeHistory()
@@ -488,6 +703,36 @@ internal class JMeterTextAreaAdapters(
 
     private companion object {
         const val ADAPTER_PROPERTY = "jmeter.intellij.text.area.adapter"
-        const val SCAN_INTERVAL_MS = 250
+        const val LANGUAGE_OVERRIDE_PROPERTY = "jmeter.intellij.text.area.language"
+
+        fun <T> identitySet(): MutableSet<T> = Collections.newSetFromMap(IdentityHashMap())
     }
+}
+
+private class ViewportEditorHost(component: JComponent) : JPanel(java.awt.BorderLayout()), Scrollable {
+    init {
+        add(component, java.awt.BorderLayout.CENTER)
+    }
+
+    override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+
+    override fun getScrollableUnitIncrement(
+        visibleRect: Rectangle,
+        orientation: Int,
+        direction: Int,
+    ): Int = if (orientation == SwingConstants.VERTICAL) 16 else 8
+
+    override fun getScrollableBlockIncrement(
+        visibleRect: Rectangle,
+        orientation: Int,
+        direction: Int,
+    ): Int = if (orientation == SwingConstants.VERTICAL) {
+        visibleRect.height.coerceAtLeast(16)
+    } else {
+        visibleRect.width.coerceAtLeast(8)
+    }
+
+    override fun getScrollableTracksViewportWidth(): Boolean = true
+
+    override fun getScrollableTracksViewportHeight(): Boolean = true
 }
