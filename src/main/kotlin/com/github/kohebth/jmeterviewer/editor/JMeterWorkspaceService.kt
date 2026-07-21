@@ -6,6 +6,7 @@ import com.github.kohebth.jmeterviewer.execution.JMeterRunConfiguration
 import com.github.kohebth.jmeterviewer.execution.JMeterRunConfigurationType
 import com.github.kohebth.jmeterviewer.execution.JMeterRunMode
 import com.github.kohebth.jmeterviewer.runtime.JMeterConfigurationException
+import com.github.kohebth.jmeterviewer.runtime.JMeterJavaEnvironment
 import com.github.kohebth.jmeterviewer.runtime.JMeterRuntimeService
 import com.github.kohebth.jmeterviewer.runtime.JMeterReplaceResult
 import com.github.kohebth.jmeterviewer.runtime.JMeterSearchMatch
@@ -720,7 +721,9 @@ class JMeterWorkspaceService : Disposable {
         val installation = ApplicationManager.getApplication()
             .getService(JMeterRuntimeService::class.java)
             .configuredInstallation()
-        val commandPrefix = installation.commandLinePrefix(SystemInfo.isWindows)
+        val isWindows = SystemInfo.isWindows
+        val commandPrefix = installation.commandLinePrefix(isWindows)
+        val javaEnvironment = JMeterJavaEnvironment.resolve(isWindows)
         val sourcePath = editor.virtualFile.toNioPath().toAbsolutePath().normalize()
         val sourceDirectory = sourcePath.parent
             ?: throw IllegalStateException("The JMX file has no parent directory: $sourcePath")
@@ -760,6 +763,11 @@ class JMeterWorkspaceService : Disposable {
                 )
                 .withWorkDirectory(sourceDirectory.toFile())
                 .withCharset(StandardCharsets.UTF_8)
+                .apply {
+                    javaEnvironment.forEach { (name, value) ->
+                        withEnvironment(name, value)
+                    }
+                }
             val request = JMeterLaunchRequest(
                 commandLine = commandLine,
                 ownerFile = editor.virtualFile,

@@ -54,6 +54,11 @@ to that JMX until completion. Other XML editors remain usable. A token-protected
 loopback bridge streams samples into the native **Results Tree** and **Aggregate
 Report** tabs, with a temporary journal as a delivery fallback.
 
+The process uses a valid inherited `JAVA_HOME`/`JRE_HOME` when available and
+otherwise falls back to the IDE runtime. Its Java `bin` directory is added to
+the child process path, so desktop-launched IDEs do not require separate shell
+environment setup before running a thread group.
+
 ## Runtime isolation
 
 JMeter and its dependencies are loaded from the selected installation in an
