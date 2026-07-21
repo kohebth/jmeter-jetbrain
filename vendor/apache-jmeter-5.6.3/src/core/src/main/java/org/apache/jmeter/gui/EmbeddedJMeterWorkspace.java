@@ -34,19 +34,17 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import javax.swing.JComponent;
-import javax.swing.JScrollPane;
 import javax.swing.JTree;
 import javax.swing.SwingUtilities;
-import javax.swing.event.TreeExpansionEvent;
-import javax.swing.event.TreeExpansionListener;
 import javax.swing.text.JTextComponent;
-import javax.swing.tree.DefaultTreeSelectionModel;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
 
@@ -55,6 +53,9 @@ import org.apache.jmeter.gui.action.ActionNames;
 import org.apache.jmeter.gui.action.ActionRouter;
 import org.apache.jmeter.gui.action.CheckDirty;
 import org.apache.jmeter.gui.action.Load;
+import org.apache.jmeter.gui.action.RawTextSearcher;
+import org.apache.jmeter.gui.action.RegexpSearcher;
+import org.apache.jmeter.gui.action.Searcher;
 import org.apache.jmeter.gui.action.Start;
 import org.apache.jmeter.gui.tree.JMeterTreeListener;
 import org.apache.jmeter.gui.tree.JMeterTreeModel;
@@ -70,6 +71,8 @@ import org.apache.jmeter.visualizers.Visualizer;
 import org.apache.jorphan.collections.HashTree;
 import org.apache.jorphan.gui.ui.TextComponentUI;
 import org.apiguardian.api.API;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Small, source-level embedding boundary for JMeter's native authoring UI.
@@ -82,6 +85,7 @@ import org.apiguardian.api.API;
  */
 @API(since = "5.6.3", status = API.Status.EXPERIMENTAL)
 public final class EmbeddedJMeterWorkspace implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(EmbeddedJMeterWorkspace.class);
     private static final int EMBEDDED_ACTION_ID = 0x4a4d58;
     public static final String RUN_SELECTED_THREAD_GROUPS = "jmeter.run.selected.thread.groups";
     public static final String SHUTDOWN_TEST = "jmeter.shutdown.test";
@@ -94,8 +98,7 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
     private final JComponent embeddedComponent;
     private final Map<String, ResultSession> resultSessions = new LinkedHashMap<>();
     private final Deque<ResultSession> reusableResultSessions = new ArrayDeque<>();
-    private JTree outlineTree;
-    private JComponent outlineComponent;
+    private final JComponent outlineComponent;
     private Runnable modelChangeListener = () -> { };
     private boolean closed;
 
@@ -109,6 +112,7 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         this.dirtyTracker = dirtyTracker;
         this.startCommand = startCommand;
         this.embeddedComponent = mainFrame.getEmbeddedComponent();
+        this.outlineComponent = mainFrame.getEmbeddedTreeComponent();
         disablePerTextUndo(this.embeddedComponent);
     }
 
@@ -190,24 +194,153 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
     }
 
     /**
-     * Return a second native tree view that shares the authoring tree's model
-     * and selection, for placement in the host's JMeter tool window.
+     * Return JMeter's authoritative native tree for placement in the host's tool window.
      *
-     * @return synchronized test-plan outline
+     * @return native test-plan tree
      */
     public JComponent getOutlineComponent() {
         ensureOpen();
-        if (outlineTree == null) {
-            JTree authoringTree = mainFrame.getTree();
-            outlineTree = new JTree(authoringTree.getModel());
-            outlineTree.setSelectionModel(new DefaultTreeSelectionModel());
-            outlineTree.setCellRenderer(authoringTree.getCellRenderer());
-            outlineTree.setRootVisible(authoringTree.isRootVisible());
-            outlineTree.setShowsRootHandles(authoringTree.getShowsRootHandles());
-            synchronizeTrees(authoringTree, outlineTree);
-            outlineComponent = new JScrollPane(outlineTree);
-        }
         return outlineComponent;
+    }
+
+    /**
+     * Search the current test plan using JMeter's native searchable-token semantics.
+     * Each result map contains only bootstrap/JDK values so an isolated host classloader
+     * can consume it safely.
+     *
+     * @return ordered result metadata containing path, name, type, breadcrumb, and replaceability
+     */
+    public List<Map<String, Object>> searchTestPlan(
+            String query,
+            boolean caseSensitive,
+            boolean regexp) throws Exception {
+        requireEventDispatchThread();
+        ensureOpen();
+        notifyIfModelChanged();
+        resetSearchMarks();
+        if (query == null || query.isEmpty()) {
+            mainFrame.getTree().repaint();
+            return Collections.emptyList();
+        }
+
+        Searcher searcher = regexp
+                ? new RegexpSearcher(caseSensitive, query)
+                : new RawTextSearcher(caseSensitive, query);
+        // Fail once with a useful error instead of recompiling an invalid expression per node.
+        if (regexp) {
+            Pattern.compile(query, caseSensitive ? 0 : Pattern.CASE_INSENSITIVE);
+        }
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (JMeterTreeNode node : guiPackage.getTreeModel().getNodesOfType(Searchable.class)) {
+            Object element = node.getUserObject();
+            if (!(element instanceof Searchable)) {
+                continue;
+            }
+            try {
+                if (!searcher.search(((Searchable) element).getSearchableTokens())) {
+                    continue;
+                }
+            } catch (Exception failure) {
+                LOG.error("Unable to search JMeter element {}", node.getName(), failure);
+                continue;
+            }
+            node.setMarkedBySearch(true);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("path", new TreePath(node.getPath()));
+            result.put("name", node.getName());
+            result.put("type", searchableType(node));
+            result.put("breadcrumb", breadcrumb(node));
+            result.put("replaceable", element instanceof Replaceable);
+            results.add(result);
+        }
+        mainFrame.getTree().repaint();
+        return Collections.unmodifiableList(results);
+    }
+
+    /** Clear all native search marks from the current test plan. */
+    public void resetSearch() {
+        requireEventDispatchThread();
+        ensureOpen();
+        resetSearchMarks();
+        mainFrame.getTree().repaint();
+    }
+
+    /** Select, expand, and reveal one result in the authoritative native tree. */
+    public void selectSearchResult(TreePath path) {
+        requireEventDispatchThread();
+        ensureOpen();
+        Objects.requireNonNull(path, "path");
+        JTree tree = mainFrame.getTree();
+        tree.setSelectionPath(path);
+        tree.expandPath(path.getParentPath());
+        tree.scrollPathToVisible(path);
+    }
+
+    /**
+     * Replace matching content only in JMeter elements implementing {@link Replaceable}.
+     * Empty replacement text is intentionally valid.
+     *
+     * @return occurrences replaced, supported nodes visited, and unsupported nodes skipped
+     */
+    public int[] replaceSearchResults(
+            TreePath[] paths,
+            String query,
+            String replacement,
+            boolean caseSensitive,
+            boolean regexp) throws Exception {
+        requireEventDispatchThread();
+        ensureOpen();
+        Objects.requireNonNull(paths, "paths");
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(replacement, "replacement");
+        if (query.isEmpty()) {
+            return new int[] { 0, 0, 0 };
+        }
+
+        notifyIfModelChanged();
+        String expression = regexp ? query : Pattern.quote(query);
+        if (regexp) {
+            Pattern.compile(query, caseSensitive ? 0 : Pattern.CASE_INSENSITIVE);
+        }
+
+        int occurrences = 0;
+        int supportedNodes = 0;
+        int skippedNodes = 0;
+        boolean currentNodeChanged = false;
+        JMeterTreeNode currentNode = guiPackage.getCurrentNode();
+        for (TreePath path : paths) {
+            if (path == null || !(path.getLastPathComponent() instanceof JMeterTreeNode)) {
+                skippedNodes++;
+                continue;
+            }
+            JMeterTreeNode node = (JMeterTreeNode) path.getLastPathComponent();
+            Object element = node.getUserObject();
+            if (!(element instanceof Replaceable)) {
+                skippedNodes++;
+                continue;
+            }
+            supportedNodes++;
+            int replaced;
+            try {
+                replaced = ((Replaceable) element).replace(expression, replacement, caseSensitive);
+            } catch (Exception failure) {
+                throw new IllegalStateException("Unable to replace content in " + node.getName(), failure);
+            }
+            if (replaced > 0) {
+                occurrences += replaced;
+                guiPackage.getTreeModel().nodeChanged(node);
+                currentNodeChanged |= node == currentNode;
+            }
+        }
+        if (currentNodeChanged) {
+            guiPackage.refreshCurrentGui();
+        }
+        if (occurrences > 0) {
+            modelChangeListener.run();
+        }
+        mainFrame.getTree().repaint();
+        return new int[] { occurrences, supportedNodes, skippedNodes };
     }
 
     /** @return native Results Tree for the opaque host session identifier. */
@@ -448,6 +581,45 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         }
     }
 
+    private void resetSearchMarks() {
+        JMeterTreeNode root = (JMeterTreeNode) guiPackage.getTreeModel().getRoot();
+        Enumeration<?> nodes = root.preorderEnumeration();
+        List<JMeterTreeNode> allNodes = new ArrayList<>();
+        while (nodes.hasMoreElements()) {
+            Object candidate = nodes.nextElement();
+            if (candidate instanceof JMeterTreeNode) {
+                JMeterTreeNode node = (JMeterTreeNode) candidate;
+                allNodes.add(node);
+                node.setMarkedBySearch(false);
+            }
+        }
+        // JMeter's setMarkedBySearch also tags ancestors, even while clearing a mark.
+        // Clear the derived ancestor flag only after all direct marks are gone.
+        for (JMeterTreeNode node : allNodes) {
+            node.setChildrenNodesHaveMatched(false);
+        }
+    }
+
+    private static String searchableType(JMeterTreeNode node) {
+        try {
+            return node.getStaticLabel();
+        } catch (RuntimeException | LinkageError ignored) {
+            return node.getTestElement().getClass().getSimpleName();
+        }
+    }
+
+    private static String breadcrumb(JMeterTreeNode node) {
+        Object[] path = node.getPath();
+        List<String> names = new ArrayList<>();
+        for (int index = 1; index < path.length; index++) {
+            Object candidate = path[index];
+            if (candidate instanceof JMeterTreeNode) {
+                names.add(((JMeterTreeNode) candidate).getName());
+            }
+        }
+        return String.join(" › ", names);
+    }
+
     private ResultSession resultSession(String sessionId) {
         String id = requireSessionId(sessionId);
         return resultSessions.computeIfAbsent(id, ignored -> {
@@ -535,88 +707,6 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
             for (Component child : ((Container) component).getComponents()) {
                 disablePerTextUndo(child);
             }
-        }
-    }
-
-    private static void synchronizeTrees(JTree authoringTree, JTree synchronizedTree) {
-        boolean[] synchronizingSelection = { false };
-        authoringTree.addTreeSelectionListener(event -> {
-            if (synchronizingSelection[0]) {
-                return;
-            }
-            synchronizingSelection[0] = true;
-            try {
-                synchronizedTree.setSelectionPaths(authoringTree.getSelectionPaths());
-                TreePath lead = authoringTree.getLeadSelectionPath();
-                if (lead != null) {
-                    synchronizedTree.scrollPathToVisible(lead);
-                }
-            } finally {
-                synchronizingSelection[0] = false;
-            }
-        });
-        synchronizedTree.addTreeSelectionListener(event -> {
-            if (synchronizingSelection[0]) {
-                return;
-            }
-            synchronizingSelection[0] = true;
-            try {
-                authoringTree.setSelectionPaths(synchronizedTree.getSelectionPaths());
-                TreePath lead = synchronizedTree.getLeadSelectionPath();
-                if (lead != null) {
-                    authoringTree.scrollPathToVisible(lead);
-                }
-            } finally {
-                synchronizingSelection[0] = false;
-            }
-        });
-
-        boolean[] synchronizingExpansion = { false };
-        installExpansionSynchronization(authoringTree, synchronizedTree, synchronizingExpansion);
-        installExpansionSynchronization(synchronizedTree, authoringTree, synchronizingExpansion);
-        for (int row = 0; row < authoringTree.getRowCount(); row++) {
-            TreePath path = authoringTree.getPathForRow(row);
-            if (path != null && authoringTree.isExpanded(path)) {
-                synchronizedTree.expandPath(path);
-            }
-        }
-        synchronizedTree.setSelectionPaths(authoringTree.getSelectionPaths());
-    }
-
-    private static void installExpansionSynchronization(
-            JTree source,
-            JTree target,
-            boolean[] synchronizing) {
-        source.addTreeExpansionListener(new TreeExpansionListener() {
-            @Override
-            public void treeExpanded(TreeExpansionEvent event) {
-                synchronizeExpansion(target, event.getPath(), true, synchronizing);
-            }
-
-            @Override
-            public void treeCollapsed(TreeExpansionEvent event) {
-                synchronizeExpansion(target, event.getPath(), false, synchronizing);
-            }
-        });
-    }
-
-    private static void synchronizeExpansion(
-            JTree target,
-            TreePath path,
-            boolean expanded,
-            boolean[] synchronizing) {
-        if (synchronizing[0]) {
-            return;
-        }
-        synchronizing[0] = true;
-        try {
-            if (expanded) {
-                target.expandPath(path);
-            } else {
-                target.collapsePath(path);
-            }
-        } finally {
-            synchronizing[0] = false;
         }
     }
 

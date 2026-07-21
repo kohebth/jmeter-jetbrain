@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.github.kohebth"
-version = "0.1.7-SNAPSHOT"
+version = "0.1.8-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -148,7 +148,7 @@ tasks.withType<Test>().configureEach {
 }
 
 tasks.named<RunPluginVerifierTask>("runPluginVerifier") {
-    ideVersions.set(listOf("PC-2022.1.4"))
+    ideVersions.set(listOf("PC-2022.1.4", "PC-2025.1.6.1"))
 }
 
 tasks.patchPluginXml {

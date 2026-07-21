@@ -5,11 +5,40 @@ import java.awt.event.ActionListener
 import java.io.InputStream
 import java.nio.file.Path
 import javax.swing.JComponent
+import javax.swing.tree.TreePath
+
+internal data class JMeterSearchMatch(
+    val path: TreePath,
+    val name: String,
+    val type: String,
+    val breadcrumb: String,
+    val replaceable: Boolean,
+)
+
+internal data class JMeterReplaceResult(
+    val occurrences: Int,
+    val supportedNodes: Int,
+    val skippedNodes: Int,
+)
 
 internal interface JMeterWorkspace : AutoCloseable {
     val component: JComponent
 
     val outlineComponent: JComponent
+
+    fun searchTestPlan(query: String, caseSensitive: Boolean, regexp: Boolean): List<JMeterSearchMatch>
+
+    fun resetSearch()
+
+    fun selectSearchResult(path: TreePath)
+
+    fun replaceSearchResults(
+        matches: List<JMeterSearchMatch>,
+        query: String,
+        replacement: String,
+        caseSensitive: Boolean,
+        regexp: Boolean,
+    ): JMeterReplaceResult
 
     fun resultsTreeComponent(sessionId: String): JComponent
 
@@ -63,6 +92,25 @@ internal class ReflectiveJMeterWorkspace(
     private var closed = false
     private val getComponent = workspaceClass.getMethod("getComponent")
     private val getOutlineComponent = workspaceClass.getMethod("getOutlineComponent")
+    private val searchTestPlanMethod = workspaceClass.getMethod(
+        "searchTestPlan",
+        String::class.java,
+        Boolean::class.javaPrimitiveType,
+        Boolean::class.javaPrimitiveType,
+    )
+    private val resetSearchMethod = workspaceClass.getMethod("resetSearch")
+    private val selectSearchResultMethod = workspaceClass.getMethod(
+        "selectSearchResult",
+        TreePath::class.java,
+    )
+    private val replaceSearchResultsMethod = workspaceClass.getMethod(
+        "replaceSearchResults",
+        emptyArray<TreePath>().javaClass,
+        String::class.java,
+        String::class.java,
+        Boolean::class.javaPrimitiveType,
+        Boolean::class.javaPrimitiveType,
+    )
     private val getResultsTreeComponent = workspaceClass.getMethod(
         "getResultsTreeComponent",
         String::class.java,
@@ -120,6 +168,56 @@ internal class ReflectiveJMeterWorkspace(
     override val outlineComponent: JComponent
         get() = call(getOutlineComponent) as? JComponent
             ?: throw JMeterRuntimeException("JMeter returned an incompatible outline component")
+
+    override fun searchTestPlan(
+        query: String,
+        caseSensitive: Boolean,
+        regexp: Boolean,
+    ): List<JMeterSearchMatch> {
+        val rawResults = call(searchTestPlanMethod, query, caseSensitive, regexp) as? List<*>
+            ?: throw JMeterRuntimeException("JMeter returned incompatible search results")
+        return rawResults.map { rawResult ->
+            val values = rawResult as? Map<*, *>
+                ?: throw JMeterRuntimeException("JMeter returned an incompatible search result")
+            JMeterSearchMatch(
+                path = values["path"] as? TreePath
+                    ?: throw JMeterRuntimeException("A JMeter search result has no tree path"),
+                name = values["name"] as? String ?: "",
+                type = values["type"] as? String ?: "",
+                breadcrumb = values["breadcrumb"] as? String ?: "",
+                replaceable = values["replaceable"] as? Boolean ?: false,
+            )
+        }
+    }
+
+    override fun resetSearch() {
+        call(resetSearchMethod)
+    }
+
+    override fun selectSearchResult(path: TreePath) {
+        call(selectSearchResultMethod, path)
+    }
+
+    override fun replaceSearchResults(
+        matches: List<JMeterSearchMatch>,
+        query: String,
+        replacement: String,
+        caseSensitive: Boolean,
+        regexp: Boolean,
+    ): JMeterReplaceResult {
+        val counts = call(
+            replaceSearchResultsMethod,
+            matches.map(JMeterSearchMatch::path).toTypedArray(),
+            query,
+            replacement,
+            caseSensitive,
+            regexp,
+        ) as? IntArray ?: throw JMeterRuntimeException("JMeter returned incompatible replacement totals")
+        if (counts.size != 3) {
+            throw JMeterRuntimeException("JMeter returned incomplete replacement totals")
+        }
+        return JMeterReplaceResult(counts[0], counts[1], counts[2])
+    }
 
     override fun resultsTreeComponent(sessionId: String): JComponent =
         call(getResultsTreeComponent, sessionId) as? JComponent

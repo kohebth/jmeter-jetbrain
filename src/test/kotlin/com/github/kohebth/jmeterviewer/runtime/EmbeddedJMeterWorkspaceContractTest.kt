@@ -6,6 +6,7 @@ import java.io.InputStream
 import java.nio.file.Path
 import java.awt.event.ActionListener
 import javax.swing.JComponent
+import javax.swing.tree.TreePath
 
 class EmbeddedJMeterWorkspaceContractTest {
     @Test
@@ -42,6 +43,31 @@ class EmbeddedJMeterWorkspaceContractTest {
             assertEquals(Boolean::class.javaPrimitiveType, api.getMethod("isDirty").returnType)
             assertEquals(Void.TYPE, api.getMethod("markSaved").returnType)
             assertEquals(JComponent::class.java, api.getMethod("getOutlineComponent").returnType)
+            assertEquals(
+                List::class.java,
+                api.getMethod(
+                    "searchTestPlan",
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                ).returnType,
+            )
+            assertEquals(Void.TYPE, api.getMethod("resetSearch").returnType)
+            assertEquals(
+                Void.TYPE,
+                api.getMethod("selectSearchResult", TreePath::class.java).returnType,
+            )
+            assertEquals(
+                IntArray::class.java,
+                api.getMethod(
+                    "replaceSearchResults",
+                    emptyArray<TreePath>().javaClass,
+                    String::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                ).returnType,
+            )
             assertEquals(
                 JComponent::class.java,
                 api.getMethod("getResultsTreeComponent", String::class.java).returnType,

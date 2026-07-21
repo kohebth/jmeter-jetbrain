@@ -581,7 +581,7 @@ public class MainFrame extends JFrame implements TestStateListener, Remoteable, 
         treeAndMain.setResizeWeight(.2);
         treeAndMain.setContinuousLayout(true);
         if (embeddedMode) {
-            embeddedComponent = treeAndMain;
+            embeddedComponent = mainPanel;
         } else {
             all.add(treeAndMain, BorderLayout.CENTER);
             getContentPane().add(all);
@@ -611,7 +611,7 @@ public class MainFrame extends JFrame implements TestStateListener, Remoteable, 
     }
 
     /**
-     * Return the native JMeter tree and form split for an embedding host.
+     * Return the native JMeter form for an embedding host.
      *
      * @return the embeddable editor component
      * @throws IllegalStateException when this is a standalone frame
@@ -621,6 +621,19 @@ public class MainFrame extends JFrame implements TestStateListener, Remoteable, 
             throw new IllegalStateException("This MainFrame was not created for embedding");
         }
         return embeddedComponent;
+    }
+
+    /**
+     * Return the native JMeter tree for placement in an embedding host's tool window.
+     *
+     * @return the embeddable test-plan tree component
+     * @throws IllegalStateException when this is a standalone frame
+     */
+    public JComponent getEmbeddedTreeComponent() {
+        if (!embeddedMode) {
+            throw new IllegalStateException("This MainFrame was not created for embedding");
+        }
+        return treePanel;
     }
 
     /** Release listeners and hidden frame resources owned by embedded mode. */

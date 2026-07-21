@@ -2,6 +2,7 @@ package com.github.kohebth.jmeterviewer.editor
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.command.undo.UndoUtil
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
@@ -538,15 +539,17 @@ internal class JMeterTextAreaAdapters(
             if (released || !source.isEditable) {
                 return
             }
-            val temporaryFile = PsiFileFactory.getInstance(project).createFileFromText(
-                "jmeter-field.${language.extension}",
-                language.fileType,
-                ideDocument.immutableCharSequence,
-            )
+            val temporaryFile = ReadAction.compute<com.intellij.psi.PsiFile, RuntimeException> {
+                PsiFileFactory.getInstance(project).createFileFromText(
+                    "jmeter-field.${language.extension}",
+                    language.fileType,
+                    ideDocument.immutableCharSequence,
+                )
+            }
             ApplicationManager.getApplication().runWriteAction {
                 CodeStyleManager.getInstance(project).reformat(temporaryFile)
             }
-            val formatted = temporaryFile.text
+            val formatted = ReadAction.compute<String, RuntimeException> { temporaryFile.text }
             if (formatted != ideDocument.text) {
                 ApplicationManager.getApplication().runWriteAction {
                     ideDocument.setText(formatted)
@@ -555,10 +558,11 @@ internal class JMeterTextAreaAdapters(
         }
 
         private fun createLanguageDocument(fileType: FileType) =
-            PsiFileFactory.getInstance(project)
-                .createFileFromText("jmeter-field.${language.extension}", fileType, source.text)
-                .let { psiFile -> PsiDocumentManager.getInstance(project).getDocument(psiFile) }
-                ?: editorFactory.createDocument(source.text)
+            ReadAction.compute<com.intellij.openapi.editor.Document?, RuntimeException> {
+                PsiFileFactory.getInstance(project)
+                    .createFileFromText("jmeter-field.${language.extension}", fileType, source.text)
+                    .let { psiFile -> PsiDocumentManager.getInstance(project).getDocument(psiFile) }
+            } ?: editorFactory.createDocument(source.text)
 
         private fun syncToSwing() {
             val replacement = TextReplacement.between(source.text, ideDocument.immutableCharSequence)

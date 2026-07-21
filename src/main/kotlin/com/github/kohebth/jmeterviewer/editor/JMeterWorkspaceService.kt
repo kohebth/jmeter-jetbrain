@@ -7,6 +7,8 @@ import com.github.kohebth.jmeterviewer.execution.JMeterRunConfigurationType
 import com.github.kohebth.jmeterviewer.execution.JMeterRunMode
 import com.github.kohebth.jmeterviewer.runtime.JMeterConfigurationException
 import com.github.kohebth.jmeterviewer.runtime.JMeterRuntimeService
+import com.github.kohebth.jmeterviewer.runtime.JMeterReplaceResult
+import com.github.kohebth.jmeterviewer.runtime.JMeterSearchMatch
 import com.github.kohebth.jmeterviewer.runtime.JMeterWorkspace
 import com.github.kohebth.jmeterviewer.toolwindow.JMeterToolWindowController
 import com.intellij.execution.ProgramRunnerUtil
@@ -313,6 +315,7 @@ class JMeterWorkspaceService : Disposable {
             ByteArrayInputStream(bytes),
             editor.virtualFile.toNioPath(),
         )
+        editor.project.getService(JMeterToolWindowController::class.java).resetTestPlanSearch()
         val fingerprint = DocumentFingerprint.of(text)
         loadedFile = editor.virtualFile
         syncState = DocumentSyncState(fingerprint)
@@ -389,11 +392,13 @@ class JMeterWorkspaceService : Disposable {
     private fun snapshotIntoDocument(
         editor: JMeterVisualFileEditor,
         nativeWorkspace: JMeterWorkspace,
+        commandName: String = JMX_EDIT_COMMAND_NAME,
+        commandGroup: Any = fieldEditGroup ?: Any(),
     ): Boolean {
         val snapshot = nativeWorkspace.snapshot()
         val text = String(snapshot, StandardCharsets.UTF_8)
         TextReplacement.between(editor.document.immutableCharSequence, text)?.let { replacement ->
-            applyDocumentReplacement(editor, replacement)
+            applyDocumentReplacement(editor, replacement, commandName, commandGroup)
         }
         val fingerprint = DocumentFingerprint.of(editor.document.immutableCharSequence)
         (syncState ?: DocumentSyncState(fingerprint).also { syncState = it }).accept(fingerprint)
@@ -404,6 +409,8 @@ class JMeterWorkspaceService : Disposable {
     private fun applyDocumentReplacement(
         editor: JMeterVisualFileEditor,
         replacement: TextReplacement,
+        commandName: String,
+        commandGroup: Any,
     ) {
         val application = ApplicationManager.getApplication()
         val mutation = Runnable {
@@ -428,8 +435,8 @@ class JMeterWorkspaceService : Disposable {
             commandProcessor.executeCommand(
                 editor.project,
                 writeMutation,
-                JMX_EDIT_COMMAND_NAME,
-                fieldEditGroup ?: Any(),
+                commandName,
+                commandGroup,
                 editor.document,
             )
         }
@@ -442,12 +449,26 @@ class JMeterWorkspaceService : Disposable {
         val sessionId = sessionIdFor(editor.virtualFile)
         val controller = editor.project.getService(JMeterToolWindowController::class.java)
         controller.show(
-            nativeWorkspace,
-            sessionId,
-            editor.virtualFile.name,
-        ) {
-            nativeWorkspace.clearResults(sessionId)
-        }
+            workspace = nativeWorkspace,
+            sessionId = sessionId,
+            displayName = editor.virtualFile.name,
+            onClearResults = { nativeWorkspace.clearResults(sessionId) },
+            onReplace = { matches, query, replacement, caseSensitive, regexp ->
+                replaceSearchResults(
+                    editor,
+                    nativeWorkspace,
+                    matches,
+                    query,
+                    replacement,
+                    caseSensitive,
+                    regexp,
+                )
+            },
+            onHistoryAction = { redo -> performHistoryAction(editor, redo, null) },
+        )
+        ToolWindowManager.getInstance(editor.project)
+            .getToolWindow(JMETER_TOOL_WINDOW_ID)
+            ?.show(Runnable { controller.selectTestPlan() })
 
         textAreaAdapters?.dispose()
         val editorComponent = nativeWorkspace.component
@@ -477,6 +498,50 @@ class JMeterWorkspaceService : Disposable {
             },
             onLanguageContextChanged = editor::showLanguageContext,
         )
+    }
+
+    private fun replaceSearchResults(
+        editor: JMeterVisualFileEditor,
+        nativeWorkspace: JMeterWorkspace,
+        matches: List<JMeterSearchMatch>,
+        query: String,
+        replacement: String,
+        caseSensitive: Boolean,
+        regexp: Boolean,
+    ): JMeterReplaceResult {
+        check(activeEditor === editor && workspace === nativeWorkspace) {
+            "The JMeter test plan is no longer active."
+        }
+        fieldSnapshotTimer.stop()
+        check(synchronizeDocument(editor)) {
+            "The current JMeter form could not be synchronized before replacement."
+        }
+
+        val replacementGroup = Any()
+        fieldEditGroup = replacementGroup
+        return try {
+            val result = nativeWorkspace.replaceSearchResults(
+                matches,
+                query,
+                replacement,
+                caseSensitive,
+                regexp,
+            )
+            if (result.occurrences > 0) {
+                snapshotIntoDocument(
+                    editor,
+                    nativeWorkspace,
+                    commandName = JMX_REPLACE_COMMAND_NAME,
+                    commandGroup = replacementGroup,
+                )
+                pendingVisualChange = false
+                textAreaAdapters?.scanNow()
+                editor.refreshModifiedState()
+            }
+            result
+        } finally {
+            fieldEditGroup = Any()
+        }
     }
 
     private fun failSurfaceBinding(
@@ -513,7 +578,7 @@ class JMeterWorkspaceService : Disposable {
     private fun performHistoryAction(
         editor: JMeterVisualFileEditor,
         redo: Boolean,
-        focus: JMeterFieldFocus,
+        focus: JMeterFieldFocus?,
     ) {
         val nativeWorkspace = workspace ?: return
         if (activeEditor !== editor || loadedFile != editor.virtualFile) {
@@ -545,11 +610,12 @@ class JMeterWorkspaceService : Disposable {
             ByteArrayInputStream(text.toByteArray(StandardCharsets.UTF_8)),
             editor.virtualFile.toNioPath(),
         )
+        editor.project.getService(JMeterToolWindowController::class.java).resetTestPlanSearch()
         fieldSnapshotTimer.stop()
         val fingerprint = DocumentFingerprint.of(text)
         (syncState ?: DocumentSyncState(fingerprint).also { syncState = it }).accept(fingerprint)
         pendingVisualChange = false
-        textAreaAdapters?.restoreAfterHistory(focus)
+        focus?.let { textAreaAdapters?.restoreAfterHistory(it) }
         fieldEditGroup = Any()
         editor.refreshModifiedState()
     }
@@ -908,6 +974,7 @@ class JMeterWorkspaceService : Disposable {
         const val FIELD_SNAPSHOT_DELAY_MS = 250
         const val MAX_SAMPLES_PER_EDT_BATCH = 32
         const val JMX_EDIT_COMMAND_NAME = "Edit JMeter Test Plan"
+        const val JMX_REPLACE_COMMAND_NAME = "Replace in JMeter Test Plan"
         const val JMETER_TOOL_WINDOW_ID = "JMeter"
         const val NOTIFICATION_GROUP_ID = "JMeter"
     }
