@@ -1,6 +1,11 @@
 .gradle/
+.gradle-local/
+.idea/
+.intellijPlatform/
 build/
 out/
-.idea/
 *.iml
-.gradle-local/
+*.log
+
+vendor/apache-jmeter-5.6.3/.gradle/
+vendor/apache-jmeter-5.6.3/**/build/

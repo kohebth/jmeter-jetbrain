@@ -1,0 +1,9 @@
+JMeter Viewer for JetBrains IDEs
+Copyright 2026 Duy Nguyen
+
+This product includes software developed by the Apache Software Foundation
+(https://www.apache.org/), specifically Apache JMeter 5.6.3.
+
+The vendored Apache JMeter source and its notices are located under
+vendor/apache-jmeter-5.6.3.
+

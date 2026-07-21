@@ -1,64 +1,48 @@
 # JMeter Viewer for JetBrains IDEs
 
-This plugin opens Apache JMeter `.jmx` files directly in JetBrains IDEs such as PyCharm and IntelliJ IDEA, using JMeter's own Swing UI panels for the visual editor.
+JetBrains plugin that opens local `.jmx` files with Apache JMeter's native
+editable tree, element forms, structural actions, and `Copy Code` support.
+The ordinary XML editor remains available beside the visual editor.
 
-Repository: https://github.com/kohebth/jmeter-jetbrains
+Apache JMeter 5.6.3 is vendored under `vendor/apache-jmeter-5.6.3` so the
+embedded GUI integration can be maintained as a small, explicit fork.
 
-## Latest Snapshot
+## Editor ownership
 
-Download the current pre-release build from [v0.1.2-SNAPSHOT](https://github.com/kohebth/jmeter-jetbrains/releases/tag/v0.1.2-SNAPSHOT).
+JMeter supplies its standard tree, forms, context menus, validation, and JMX
+serialization. JetBrains supplies editor tabs, file navigation, Save/Save All,
+external-change handling, and the application look and feel. JMeter's standalone
+toolbar, menu bar, logger, runner controls, and file actions are not exposed.
 
-Install the ZIP in JetBrains IDEs with `Settings | Plugins | Install Plugin from Disk`.
+JMeter's GUI state is process-global, so the plugin deliberately owns one shared
+native workspace. Before another visual JMX tab becomes active, the current
+model is flushed into the IDE document and saved. A save failure cancels the
+switch. If XML and visual state both changed, the editor offers `Reload
+external`, `Overwrite visual`, or `Cancel`.
 
-## Features
+The first release supports local physical JMX files and the JMeter modules
+bundled with the plugin. External JMeter plugins, execution/results, recorder,
+templates, and report generation are intentionally deferred.
 
-- Registers `.jmx` files as JMeter test plans.
-- Adds an embedded JMeter-style visual editor before the IDE's default text editor.
-- Keeps the IDE text editor available for raw `.jmx` editing, Git highlighting, and normal IDE shortcuts.
-- Shows the JMeter test tree on the left.
-- Shows JMeter's native selected-element UI on the right.
-- Shows a categorized palette of bundled JMeter elements that can be dragged onto valid tree nodes.
-- Saves modified test plans back to `.jmx` through JMeter's own serializer.
-- Supports basic tree editing actions from the toolbar: delete, duplicate, copy, paste, move up, and move down.
-- Supports tree context menus with categorized Add actions and common edit actions.
-- Supports enable/disable toggling for tree elements.
-- Supports expanding/collapsing selected subtrees and the full test plan tree.
-- Supports keyboard shortcuts for delete, copy, paste, duplicate, enable/disable, and move up/down.
-- Palette coverage includes bundled thread groups, test fragments, samplers, controllers, config elements, assertions, pre-processors, post-processors, timers, and listeners from the included JMeter modules.
-- Discovers additional addable `JMeterGUIComponent` implementations from JMeter runtime search paths and merges them into the palette when available.
-- Supports tree search with next/previous navigation across names, comments, GUI classes, and test classes.
-- Runs and stops the current test plan through JMeter's `StandardJMeterEngine`.
-- Displays run results, request/response details, run status, and diagnostics in the bottom JMeter tool window.
+## Build and verify
 
-## Editing Status
-
-Drag-and-drop additions, context-menu additions, runtime element discovery, basic tree editing, enable/disable, tree expand/collapse, tree search, explicit Save, raw IDE text editing, basic Run/Stop, structured sample result viewing, and diagnostics logging are supported. Full JMeter editing parity is still in progress; full JMeter-native action routing, all listener visualizer behavior inside the IDE, and distributed run controls are not complete yet.
-
-## Compatibility
-
-- Targets PyCharm Community 2022.1.
-- Declares compatibility from JetBrains build `221` onward, so the same ZIP can be installed in PyCharm 2022.x and newer JetBrains IDEs such as IntelliJ IDEA 2026.
-- Uses Java 11 bytecode for compatibility with the 2022 IDE runtime.
-
-## Build
-
-Use the checked-in Gradle wrapper. The JetBrains Gradle plugin required for PyCharm 2022 is not compatible with Gradle 9.
+Use JDK 17 to run the build:
 
 ```bash
-./gradlew build
+JAVA_HOME=/home/duync/toolchains/jdk-17.0.4.1 \
+PATH=/home/duync/toolchains/jdk-17.0.4.1/bin:$PATH \
+./gradlew test verifyPluginRuntime
 ```
 
-## Run in a Development IDE
+The plugin targets JVM 11 and IntelliJ Platform build 221 (PyCharm Community
+2022.1.4). The distributable is written to `build/distributions/`.
+
+Launch the development IDE:
 
 ```bash
+JAVA_HOME=/home/duync/toolchains/jdk-17.0.4.1 \
+PATH=/home/duync/toolchains/jdk-17.0.4.1/bin:$PATH \
 ./gradlew runIde
 ```
 
-## Package
-
-```bash
-./gradlew buildPlugin
-```
-
-The plugin ZIP is written under `build/distributions/`.
-Snapshot builds are named like `jmeter-jetbrains-plugin-<version>.zip`.
+`runIde` requires a graphical environment.
