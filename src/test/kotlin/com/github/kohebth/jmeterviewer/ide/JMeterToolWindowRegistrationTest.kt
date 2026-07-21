@@ -12,7 +12,12 @@ class JMeterToolWindowRegistrationTest {
 
         assertTrue(descriptor.contains("id=\"JMeter\""))
         assertTrue(descriptor.contains("anchor=\"bottom\""))
+        assertTrue(descriptor.contains("icon=\"/icons/jmeter-tool-window.svg\""))
         assertEquals("JMeterToolWindowFactory", JMeterToolWindowFactory::class.java.simpleName)
+
+        val icon = checkNotNull(javaClass.getResource("/icons/jmeter-tool-window.svg")).readText()
+        assertTrue(icon.contains("width=\"13\""))
+        assertTrue(icon.contains("height=\"13\""))
     }
 
     @Test

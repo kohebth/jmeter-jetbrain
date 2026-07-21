@@ -33,7 +33,7 @@
         <toolWindow
                 id="JMeter"
                 anchor="bottom"
-                icon="/icons/jmeter-feather.gif"
+                icon="/icons/jmeter-tool-window.svg"
                 factoryClass="com.github.kohebth.jmeterviewer.toolwindow.JMeterToolWindowFactory"/>
         <applicationConfigurable
                 id="jmeter.viewer.settings"

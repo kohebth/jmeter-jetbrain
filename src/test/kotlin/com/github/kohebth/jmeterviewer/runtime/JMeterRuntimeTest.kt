@@ -102,10 +102,27 @@ class JMeterRuntimeTest {
             val original = thread.contextClassLoader
 
             runtime.withContextClassLoader {
-                assertSame(runtime.classLoader, thread.contextClassLoader)
+                assertSame(runtime.contextClassLoader, thread.contextClassLoader)
             }
 
             assertSame(original, thread.contextClassLoader)
+        }
+    }
+
+    @Test
+    fun contextClassloaderUsesJMeterFirstAndFallsBackToTheHostIde() {
+        ExternalJMeterTestSupport.openRuntime().use { runtime ->
+            val loggerFactory = runtime.contextClassLoader.loadClass("org.slf4j.LoggerFactory")
+            val pluginRuntime = runtime.contextClassLoader.loadClass(JMeterRuntime::class.java.name)
+
+            assertSame(runtime.classLoader, loggerFactory.classLoader)
+            assertSame(JMeterRuntime::class.java, pluginRuntime)
+
+            val serviceResource = "META-INF/services/javax.xml.parsers.SAXParserFactory"
+            val runtimeResources = runtime.classLoader.getResources(serviceResource).toList()
+            val contextResources = runtime.contextClassLoader.getResources(serviceResource).toList()
+            assertTrue(runtimeResources.isNotEmpty())
+            assertEquals(runtimeResources, contextResources)
         }
     }
 }

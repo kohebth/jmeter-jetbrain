@@ -22,6 +22,8 @@ internal data class JMeterReplaceResult(
 )
 
 internal interface JMeterWorkspace : AutoCloseable {
+    val isClosed: Boolean
+
     val component: JComponent
 
     val outlineComponent: JComponent
@@ -89,6 +91,7 @@ internal class ReflectiveJMeterWorkspace(
     workspaceClass: Class<*>,
     private val delegate: Any,
 ) : JMeterWorkspace {
+    @Volatile
     private var closed = false
     private val getComponent = workspaceClass.getMethod("getComponent")
     private val getOutlineComponent = workspaceClass.getMethod("getOutlineComponent")
@@ -160,6 +163,9 @@ internal class ReflectiveJMeterWorkspace(
     private val clearResultsMethod = workspaceClass.getMethod("clearResults", String::class.java)
     private val discardResultsMethod = workspaceClass.getMethod("discardResults", String::class.java)
     private val close = workspaceClass.getMethod("close")
+
+    override val isClosed: Boolean
+        get() = closed
 
     override val component: JComponent
         get() = call(getComponent) as? JComponent

@@ -439,8 +439,9 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
         ensureOpen();
         ResultSession session = resultSessions.remove(requireSessionId(sessionId));
         if (session != null) {
-            session.clear();
-            reusableResultSessions.addLast(session);
+            if (clearResultSession(session, "discarding a result session")) {
+                reusableResultSessions.addLast(session);
+            }
         }
     }
 
@@ -559,20 +560,42 @@ public final class EmbeddedJMeterWorkspace implements AutoCloseable {
             return;
         }
         closed = true;
-        if (startCommand.isEmbeddedTestRunning()) {
-            startCommand.stopEmbeddedTest();
-        }
+        cleanup("stopping the embedded test", () -> {
+            if (startCommand.isEmbeddedTestRunning()) {
+                startCommand.stopEmbeddedTest();
+            }
+        });
         for (ResultSession session : resultSessions.values()) {
-            session.clear();
+            clearResultSession(session, "closing a result session");
         }
         resultSessions.clear();
         reusableResultSessions.clear();
-        startCommand.setSelectedThreadGroupRunListener(null);
+        cleanup("detaching the selected-thread-group listener",
+                () -> startCommand.setSelectedThreadGroupRunListener(null));
         modelChangeListener = () -> { };
-        guiPackage.setDialogParent(null);
-        ActionRouter.getInstance().setEmbeddedPostActionListener(null);
-        mainFrame.closeEmbedded();
-        GuiPackage.disposeInstance(guiPackage);
+        cleanup("clearing the dialog parent", () -> guiPackage.setDialogParent(null));
+        cleanup("detaching the embedded action listener",
+                () -> ActionRouter.getInstance().setEmbeddedPostActionListener(null));
+        cleanup("closing the embedded frame", mainFrame::closeEmbedded);
+        cleanup("disposing the embedded GUI package", () -> GuiPackage.disposeInstance(guiPackage));
+    }
+
+    private static boolean clearResultSession(ResultSession session, String operation) {
+        try {
+            session.clear();
+            return true;
+        } catch (RuntimeException | LinkageError failure) {
+            LOG.warn("Unable to clear JMeter result components while {}", operation, failure);
+            return false;
+        }
+    }
+
+    private static void cleanup(String operation, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException | LinkageError failure) {
+            LOG.warn("Unable to finish JMeter cleanup while {}", operation, failure);
+        }
     }
 
     private void notifyIfModelChanged() {

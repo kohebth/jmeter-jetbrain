@@ -3,14 +3,18 @@ package com.github.kohebth.jmeterviewer.runtime
 import java.io.IOException
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
+import java.net.URL
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Collections
+import java.util.Enumeration
 
 internal class JMeterRuntime private constructor(
     val installation: JMeterInstallation,
     private val bridgeJar: Path,
     internal val classLoader: JMeterRuntimeClassLoader,
+    internal val contextClassLoader: JMeterContextClassLoader,
 ) : AutoCloseable {
     private var closed = false
 
@@ -27,7 +31,7 @@ internal class JMeterRuntime private constructor(
         ensureOpen()
         val thread = Thread.currentThread()
         val previous = thread.contextClassLoader
-        thread.contextClassLoader = classLoader
+        thread.contextClassLoader = contextClassLoader
         return try {
             action()
         } finally {
@@ -157,7 +161,16 @@ internal class JMeterRuntime private constructor(
             val loader = JMeterRuntimeClassLoader(
                 classpath.map { it.toUri().toURL() }.toTypedArray(),
             )
-            val runtime = JMeterRuntime(installation, normalizedBridge, loader)
+            val contextLoader = JMeterContextClassLoader(
+                runtimeClassLoader = loader,
+                hostClassLoader = JMeterRuntime::class.java.classLoader,
+            )
+            val runtime = JMeterRuntime(
+                installation,
+                normalizedBridge,
+                loader,
+                contextLoader,
+            )
             return try {
                 runtime.initialize()
                 runtime
@@ -177,6 +190,37 @@ internal class JMeterRuntimeClassLoader(urls: Array<java.net.URL>) : URLClassLoa
     urls,
     ClassLoader.getPlatformClassLoader(),
 )
+
+/**
+ * Keeps JMeter classes isolated while allowing Swing to resolve IDE look-and-feel delegates.
+ * Resources remain runtime-first and are never merged, which prevents JMeter service loading
+ * from accidentally discovering providers bundled by the host IDE.
+ */
+internal class JMeterContextClassLoader(
+    private val runtimeClassLoader: ClassLoader,
+    private val hostClassLoader: ClassLoader,
+) : ClassLoader(ClassLoader.getPlatformClassLoader()) {
+    override fun loadClass(name: String, resolve: Boolean): Class<*> =
+        synchronized(getClassLoadingLock(name)) {
+            try {
+                runtimeClassLoader.loadClass(name)
+            } catch (_: ClassNotFoundException) {
+                hostClassLoader.loadClass(name)
+            }
+        }
+
+    override fun getResource(name: String): URL? =
+        runtimeClassLoader.getResource(name) ?: hostClassLoader.getResource(name)
+
+    override fun getResources(name: String): Enumeration<URL> {
+        val runtimeResources = runtimeClassLoader.getResources(name).toList()
+        return if (runtimeResources.isNotEmpty()) {
+            Collections.enumeration(runtimeResources)
+        } else {
+            hostClassLoader.getResources(name)
+        }
+    }
+}
 
 internal class JMeterRuntimeException(
     message: String,

@@ -4,6 +4,7 @@ import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.extensions.PluginId
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
@@ -15,6 +16,7 @@ import java.util.stream.Collectors
 class JMeterRuntimeService : Disposable {
     @Volatile
     private var runtime: JMeterRuntime? = null
+    // This application service is the sole owner of the shared native workspace.
     private var workspace: JMeterWorkspace? = null
 
     @Synchronized
@@ -111,29 +113,25 @@ class JMeterRuntimeService : Disposable {
 
     @Synchronized
     override fun dispose() {
-        var failure: Throwable? = null
         try {
             workspace?.close()
         } catch (closeFailure: Throwable) {
-            failure = closeFailure
+            LOG.warn("Unable to close the embedded JMeter workspace", closeFailure)
         } finally {
             workspace = null
         }
         try {
             runtime?.close()
         } catch (closeFailure: Throwable) {
-            if (failure == null) {
-                failure = closeFailure
-            } else {
-                failure.addSuppressed(closeFailure)
-            }
+            LOG.warn("Unable to close the embedded JMeter runtime", closeFailure)
+        } finally {
+            runtime = null
         }
-        runtime = null
-        failure?.let { throw it }
     }
 
     private companion object {
         const val BRIDGE_DIRECTORY = "jmeter-bridge"
+        val LOG: Logger = Logger.getInstance(JMeterRuntimeService::class.java)
         val PLUGIN_ID: PluginId = PluginId.getId("com.github.kohebth.jmeterviewer")
     }
 }

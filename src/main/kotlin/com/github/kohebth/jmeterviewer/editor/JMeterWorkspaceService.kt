@@ -170,7 +170,7 @@ class JMeterWorkspaceService : Disposable {
 
         detach(editor)
         activeEditor = null
-        workspace?.setDialogParent(null)
+        workspace?.takeUnless(JMeterWorkspace::isClosed)?.setDialogParent(null)
         switchBlocked = false
     }
 
@@ -183,13 +183,15 @@ class JMeterWorkspaceService : Disposable {
             }
             detach(editor)
             activeEditor = null
-            workspace?.setDialogParent(null)
+            workspace?.takeUnless(JMeterWorkspace::isClosed)?.setDialogParent(null)
             switchBlocked = false
         }
 
         if (!(runInProgress() && runningFile == editor.virtualFile)) {
             resultSessionIds.remove(editor.virtualFile)?.let { sessionId ->
-                nativeWorkspace?.discardResults(sessionId)
+                if (nativeWorkspace != null && !nativeWorkspace.isClosed) {
+                    nativeWorkspace.discardResults(sessionId)
+                }
             }
         }
         if (wasActive && !editor.project.isDisposed && !(runInProgress() && runningFile == editor.virtualFile)) {
@@ -553,7 +555,9 @@ class JMeterWorkspaceService : Disposable {
     ) {
         detach(editor)
         activeEditor = null
-        nativeWorkspace.setDialogParent(null)
+        if (!nativeWorkspace.isClosed) {
+            nativeWorkspace.setDialogParent(null)
+        }
         editor.showLoadError(readableMessage(failure))
     }
 
@@ -903,7 +907,7 @@ class JMeterWorkspaceService : Disposable {
         editor.showLanguageContext(null)
         fieldEditGroup = null
         pendingVisualChange = false
-        workspace?.component?.let(editor::detachNative)
+        workspace?.takeUnless(JMeterWorkspace::isClosed)?.component?.let(editor::detachNative)
         if (!editor.project.isDisposed && runningFile == null) {
             editor.project.getService(JMeterToolWindowController::class.java).showEmpty()
         }
@@ -974,9 +978,18 @@ class JMeterWorkspaceService : Disposable {
             cancelPendingFieldSnapshot()
             textAreaAdapters?.dispose()
             textAreaAdapters = null
-            workspace?.setExecutionActionListener(null)
-            workspace?.setModelChangeListener(null)
-            workspace?.close()
+            // JMeterRuntimeService owns and closes the shared native workspace.
+            workspace?.takeUnless(JMeterWorkspace::isClosed)?.let { nativeWorkspace ->
+                try {
+                    nativeWorkspace.setExecutionActionListener(null)
+                    nativeWorkspace.setModelChangeListener(null)
+                    nativeWorkspace.setDialogParent(null)
+                } catch (failure: RuntimeException) {
+                    LOG.warn("Unable to detach listeners from the embedded JMeter workspace", failure)
+                } catch (failure: LinkageError) {
+                    LOG.warn("Unable to detach listeners from the embedded JMeter workspace", failure)
+                }
+            }
             workspace = null
             activeEditor = null
             loadedFile = null
