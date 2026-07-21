@@ -14,4 +14,5 @@ if [[ ! -x "$JAVA_HOME/bin/java" ]]; then
 fi
 
 cd "$PROJECT_DIR"
-exec ./gradlew test verifyPluginRuntime "$@" --console=plain
+./gradlew test verifyPluginRuntime "$@" --console=plain
+exec "$SCRIPT_DIR/gui-smoke-jdk17.sh"

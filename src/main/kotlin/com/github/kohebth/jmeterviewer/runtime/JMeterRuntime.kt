@@ -9,6 +9,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Collections
 import java.util.Enumeration
+import javax.swing.plaf.ComponentUI
 
 internal class JMeterRuntime private constructor(
     val installation: JMeterInstallation,
@@ -147,7 +148,11 @@ internal class JMeterRuntime private constructor(
         private const val PLUGIN_MANAGER_CLASS = "org.apache.jmeter.plugin.PluginManager"
         private const val EMBEDDED_WORKSPACE_CLASS = "org.apache.jmeter.gui.EmbeddedJMeterWorkspace"
 
-        fun open(installation: JMeterInstallation, bridgeJar: Path): JMeterRuntime {
+        fun open(
+            installation: JMeterInstallation,
+            bridgeJar: Path,
+            hostClassLoader: ClassLoader = JMeterRuntime::class.java.classLoader,
+        ): JMeterRuntime {
             val normalizedBridge = bridgeJar.toAbsolutePath().normalize()
             if (!Files.isRegularFile(normalizedBridge)) {
                 throw JMeterRuntimeException(
@@ -159,11 +164,12 @@ internal class JMeterRuntime private constructor(
                 addAll(installation.runtimeJars)
             }.distinct()
             val loader = JMeterRuntimeClassLoader(
-                classpath.map { it.toUri().toURL() }.toTypedArray(),
+                urls = classpath.map { it.toUri().toURL() }.toTypedArray(),
+                hostClassLoader = hostClassLoader,
             )
             val contextLoader = JMeterContextClassLoader(
                 runtimeClassLoader = loader,
-                hostClassLoader = JMeterRuntime::class.java.classLoader,
+                hostClassLoader = hostClassLoader,
             )
             val runtime = JMeterRuntime(
                 installation,
@@ -186,15 +192,36 @@ internal class JMeterRuntime private constructor(
     }
 }
 
-internal class JMeterRuntimeClassLoader(urls: Array<java.net.URL>) : URLClassLoader(
-    urls,
-    ClassLoader.getPlatformClassLoader(),
-)
+/**
+ * Loads JMeter from its isolated classpath. Swing asks a component's defining loader for its
+ * look-and-feel delegate, so the only host classes exposed here are ComponentUI implementations.
+ */
+internal class JMeterRuntimeClassLoader(
+    urls: Array<URL>,
+    private val hostClassLoader: ClassLoader,
+) : URLClassLoader(urls, ClassLoader.getPlatformClassLoader()) {
+    override fun loadClass(name: String, resolve: Boolean): Class<*> =
+        synchronized(getClassLoadingLock(name)) {
+            try {
+                super.loadClass(name, resolve)
+            } catch (runtimeFailure: ClassNotFoundException) {
+                val hostClass = try {
+                    hostClassLoader.loadClass(name)
+                } catch (_: ClassNotFoundException) {
+                    throw runtimeFailure
+                }
+                if (!ComponentUI::class.java.isAssignableFrom(hostClass)) {
+                    throw runtimeFailure
+                }
+                hostClass
+            }
+        }
+}
 
 /**
- * Keeps JMeter classes isolated while allowing Swing to resolve IDE look-and-feel delegates.
- * Resources remain runtime-first and are never merged, which prevents JMeter service loading
- * from accidentally discovering providers bundled by the host IDE.
+ * Supplies host classes needed by APIs that use the thread-context loader. Resources remain
+ * runtime-first and are never merged, which prevents JMeter service loading from accidentally
+ * discovering providers bundled by the host IDE.
  */
 internal class JMeterContextClassLoader(
     private val runtimeClassLoader: ClassLoader,

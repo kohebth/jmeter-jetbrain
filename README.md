@@ -78,6 +78,7 @@ The repository includes JDK 17 wrappers for the normal verification paths:
 ```bash
 ./scripts/compile-jdk17.sh
 ./scripts/test-jdk17.sh
+./scripts/gui-smoke-jdk17.sh
 ./scripts/build-jdk17.sh
 ./scripts/verify-jdk17.sh
 ./scripts/plugin-verifier-jdk17.sh
@@ -91,10 +92,14 @@ default local JDK path with `JMETER_VIEWER_JAVA_HOME=/path/to/jdk-17`.
 `build-jdk17.sh` runs the normal Gradle build. Both accept additional Gradle
 arguments.
 
-`verify-jdk17.sh` runs the complete test suite, builds the distributable, checks
-that no JMeter installation or conflicting runtime libraries were bundled, and
-enforces a 5 MiB archive-size ceiling. `plugin-verifier-jdk17.sh` runs the
-IntelliJ Plugin Verifier against the supported 2022.1.4 baseline.
+`gui-smoke-jdk17.sh` uses an existing display or a local Xvfb instance to open,
+snapshot, and reopen a complex localhost JMX plan in JMeter's native workspace;
+it also verifies recorded request and response data in Results Tree.
+`verify-jdk17.sh` includes that smoke test after the complete headless suite,
+builds the distributable, checks that no JMeter installation or conflicting
+runtime libraries were bundled, and enforces a 5 MiB archive-size ceiling.
+`plugin-verifier-jdk17.sh` runs the IntelliJ Plugin Verifier against the
+supported PyCharm compatibility targets.
 
 The plugin targets JVM 11 and IntelliJ Platform build 221 (PyCharm Community
 2022.1.4). The distributable is written to `build/distributions/`.

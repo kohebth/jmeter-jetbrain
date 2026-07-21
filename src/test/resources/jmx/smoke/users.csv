@@ -1,0 +1,4 @@
+user,password,region
+alice,alice-secret,us-east
+bob,bob-secret,eu-west
+carol,carol-secret,ap-southeast
