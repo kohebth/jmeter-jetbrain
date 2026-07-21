@@ -14,4 +14,12 @@ class JMeterToolWindowRegistrationTest {
         assertTrue(descriptor.contains("anchor=\"bottom\""))
         assertEquals("JMeterToolWindowFactory", JMeterToolWindowFactory::class.java.simpleName)
     }
+
+    @Test
+    fun registersAnIntellijRunConfigurationForJMeter() {
+        val descriptor = checkNotNull(javaClass.getResource("/META-INF/plugin.xml")).readText()
+
+        assertTrue(descriptor.contains("<configurationType"))
+        assertTrue(descriptor.contains("JMeterRunConfigurationType"))
+    }
 }
