@@ -1,7 +1,8 @@
 package com.github.kohebth.jmeterviewer.editor
 
-import com.github.kohebth.jmeterviewer.runtime.JMeterRuntime
+import com.github.kohebth.jmeterviewer.runtime.JMeterConfigurationException
 import com.github.kohebth.jmeterviewer.runtime.JMeterRuntimeService
+import com.github.kohebth.jmeterviewer.runtime.JMeterWorkspace
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
@@ -9,7 +10,6 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
-import org.apache.jmeter.gui.EmbeddedJMeterWorkspace
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
@@ -18,7 +18,7 @@ import javax.swing.JComponent
 @Service(Service.Level.APP)
 class JMeterWorkspaceService : Disposable {
     private val fileDocumentManager = FileDocumentManager.getInstance()
-    private var workspace: EmbeddedJMeterWorkspace? = null
+    private var workspace: JMeterWorkspace? = null
     private var loadedFile: VirtualFile? = null
     private var syncState: DocumentSyncState? = null
     private var activeEditor: JMeterVisualFileEditor? = null
@@ -47,6 +47,9 @@ class JMeterWorkspaceService : Disposable {
         switchBlocked = false
         val nativeWorkspace = try {
             ensureWorkspace()
+        } catch (failure: JMeterConfigurationException) {
+            editor.showLoadError(readableMessage(failure), offerConfiguration = true)
+            return@onEdt
         } catch (failure: Exception) {
             editor.showLoadError(readableMessage(failure))
             return@onEdt
@@ -211,28 +214,24 @@ class JMeterWorkspaceService : Disposable {
         editor.refreshModifiedState()
     }
 
-    private fun ensureWorkspace(): EmbeddedJMeterWorkspace {
+    private fun ensureWorkspace(): JMeterWorkspace {
         workspace?.let { return it }
-        ApplicationManager.getApplication()
+        return ApplicationManager.getApplication()
             .getService(JMeterRuntimeService::class.java)
-            .ensureInitialized()
-        return JMeterRuntime.withContextClassLoader(javaClass.classLoader) {
-            EmbeddedJMeterWorkspace.create()
-        }.also { workspace = it }
+            .createWorkspace()
+            .also { workspace = it }
     }
 
     private fun loadDocument(
         editor: JMeterVisualFileEditor,
-        nativeWorkspace: EmbeddedJMeterWorkspace,
+        nativeWorkspace: JMeterWorkspace,
     ) {
         val text = editor.document.immutableCharSequence.toString()
         val bytes = text.toByteArray(StandardCharsets.UTF_8)
-        withNativeClassLoader {
-            nativeWorkspace.load(
-                ByteArrayInputStream(bytes),
-                editor.virtualFile.toNioPath(),
-            )
-        }
+        nativeWorkspace.load(
+            ByteArrayInputStream(bytes),
+            editor.virtualFile.toNioPath(),
+        )
         val fingerprint = DocumentFingerprint.of(text)
         loadedFile = editor.virtualFile
         syncState = DocumentSyncState(fingerprint)
@@ -307,9 +306,9 @@ class JMeterWorkspaceService : Disposable {
 
     private fun snapshotIntoDocument(
         editor: JMeterVisualFileEditor,
-        nativeWorkspace: EmbeddedJMeterWorkspace,
+        nativeWorkspace: JMeterWorkspace,
     ): Boolean {
-        val snapshot = withNativeClassLoader { nativeWorkspace.snapshot() }
+        val snapshot = nativeWorkspace.snapshot()
         val text = String(snapshot, StandardCharsets.UTF_8)
         if (editor.document.immutableCharSequence.toString() != text) {
             val replaceDocument = Runnable { editor.document.setText(text) }
@@ -373,14 +372,11 @@ class JMeterWorkspaceService : Disposable {
         return root.message ?: root.javaClass.simpleName
     }
 
-    private inline fun <T> withNativeClassLoader(action: () -> T): T =
-        JMeterRuntime.withContextClassLoader(javaClass.classLoader, action)
+    private fun nativeIsDirty(nativeWorkspace: JMeterWorkspace): Boolean =
+        nativeWorkspace.isDirty
 
-    private fun nativeIsDirty(nativeWorkspace: EmbeddedJMeterWorkspace): Boolean =
-        withNativeClassLoader { nativeWorkspace.isDirty }
-
-    private fun nativeMarkSaved(nativeWorkspace: EmbeddedJMeterWorkspace) {
-        withNativeClassLoader { nativeWorkspace.markSaved() }
+    private fun nativeMarkSaved(nativeWorkspace: JMeterWorkspace) {
+        nativeWorkspace.markSaved()
     }
 
     private fun <T> onEdt(action: () -> T): T {

@@ -243,7 +243,12 @@ public final class MenuFactory {
             Optional<MenuInfo> firstDefaultSortItem = menu.stream()
                     .filter(info -> info.getSortOrder() == MenuInfo.SORT_ORDER_DEFAULT)
                     .findFirst();
-            int index = menu.indexOf(firstDefaultSortItem.orElseThrow(IllegalStateException::new));
+            if (!firstDefaultSortItem.isPresent()) {
+                // A category may legitimately contain only explicitly ordered
+                // entries. There is no default group to separate in that case.
+                continue;
+            }
+            int index = menu.indexOf(firstDefaultSortItem.get());
             if (index > 0) {
                 menu.add(index, new MenuSeparatorInfo());
             }

@@ -9,19 +9,29 @@ plugins {
 }
 
 group = "com.github.kohebth"
-version = "0.1.3-SNAPSHOT"
+version = "0.1.4-SNAPSHOT"
 
 repositories {
     mavenCentral()
 }
 
-configurations.configureEach {
-    exclude(group = "xml-apis", module = "xml-apis")
-    exclude(group = "xerces", module = "xercesImpl")
-    exclude(group = "org.apache.logging.log4j", module = "log4j-slf4j-impl")
-    exclude(group = "org.slf4j", module = "slf4j-api")
-    exclude(group = "org.slf4j", module = "slf4j-simple")
-    exclude(group = "ch.qos.logback")
+val jmeterVersion = "5.6.3"
+
+val jmeterBridge by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+}
+
+val jmeterTestRuntime by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+val jmeterPluginTest by sourceSets.creating
+
+configurations.named(jmeterPluginTest.compileClasspathConfigurationName) {
+    extendsFrom(jmeterTestRuntime)
 }
 
 configurations.named("runtimeClasspath") {
@@ -31,25 +41,29 @@ configurations.named("runtimeClasspath") {
     exclude(group = "org.jetbrains.kotlinx")
 }
 
-val jmeterVersion = "5.6.3"
-
 dependencies {
-    implementation("org.apache.jmeter:ApacheJMeter_config:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_core:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_components:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_functions:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_bolt:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_ftp:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_http:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_java:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_jdbc:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_jms:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_junit:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_ldap:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_mail:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_mongodb:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_native:$jmeterVersion")
-    implementation("org.apache.jmeter:ApacheJMeter_tcp:$jmeterVersion")
+    add(jmeterBridge.name, "org.apache.jmeter:ApacheJMeter_core:$jmeterVersion")
+
+    listOf(
+        "ApacheJMeter_config",
+        "ApacheJMeter_core",
+        "ApacheJMeter_components",
+        "ApacheJMeter_functions",
+        "ApacheJMeter_bolt",
+        "ApacheJMeter_ftp",
+        "ApacheJMeter_http",
+        "ApacheJMeter_java",
+        "ApacheJMeter_jdbc",
+        "ApacheJMeter_jms",
+        "ApacheJMeter_junit",
+        "ApacheJMeter_ldap",
+        "ApacheJMeter_mail",
+        "ApacheJMeter_mongodb",
+        "ApacheJMeter_native",
+        "ApacheJMeter_tcp",
+    ).forEach { module ->
+        add(jmeterTestRuntime.name, "org.apache.jmeter:$module:$jmeterVersion")
+    }
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")
 }
@@ -78,8 +92,56 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(11)
 }
 
+val testJMeterHome = layout.buildDirectory.dir("test-jmeter-home")
+
+val jmeterTestPluginJar by tasks.registering(Jar::class) {
+    archiveFileName.set("jmeter-viewer-test-plugin.jar")
+    from(jmeterPluginTest.output)
+}
+
+val prepareJMeterTestHome by tasks.registering(Sync::class) {
+    dependsOn(jmeterTestPluginJar)
+    into(testJMeterHome)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+
+    from(layout.projectDirectory.dir("vendor/apache-jmeter-5.6.3/bin")) {
+        include(
+            "jmeter.properties",
+            "saveservice.properties",
+            "upgrade.properties",
+            "user.properties",
+            "system.properties",
+            "log4j2.xml",
+        )
+        into("bin")
+    }
+    from(jmeterTestRuntime) {
+        include("ApacheJMeter-$jmeterVersion.jar")
+        rename { "ApacheJMeter.jar" }
+        into("bin")
+    }
+    from(jmeterTestRuntime) {
+        exclude("ApacheJMeter-$jmeterVersion.jar")
+        exclude("ApacheJMeter_*.jar")
+        into("lib")
+    }
+    from(jmeterTestRuntime) {
+        include("ApacheJMeter_*.jar")
+        into("lib/ext")
+    }
+    from(jmeterTestPluginJar) {
+        into("lib/ext")
+    }
+}
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    dependsOn(prepareJMeterTestHome)
+    dependsOn(jmeterBridge)
+    doFirst {
+        systemProperty("jmeter.test.home", testJMeterHome.get().asFile.absolutePath)
+        systemProperty("jmeter.bridge.jar", jmeterBridge.singleFile.absolutePath)
+    }
 }
 
 tasks.named<RunPluginVerifierTask>("runPluginVerifier") {
@@ -92,17 +154,20 @@ tasks.patchPluginXml {
 }
 
 tasks.withType<PrepareSandboxTask>().configureEach {
-    intoChild(pluginName.map { it + "/jmeter-home/bin" })
-        .from(layout.projectDirectory.dir("vendor/apache-jmeter-5.6.3/bin")) {
-            include(
-                "jmeter.properties",
-                "saveservice.properties",
-                "upgrade.properties",
-                "user.properties",
-                "system.properties",
-                "log4j2.xml"
-            )
-        }
+    intoChild(pluginName.map { it + "/jmeter-bridge" })
+        .from(jmeterBridge)
+}
+
+tasks.processResources {
+    from(
+        layout.projectDirectory.file(
+            "vendor/apache-jmeter-5.6.3/src/core/src/main/resources/" +
+                "org/apache/jmeter/images/feather.gif",
+        ),
+    ) {
+        into("icons")
+        rename { "jmeter-feather.gif" }
+    }
 }
 
 tasks.jar {
@@ -126,21 +191,54 @@ tasks.jar {
 
 val verifyPluginRuntime by tasks.registering {
     group = "verification"
-    description = "Checks that platform-owned Kotlin libraries are not bundled in the plugin."
+    description = "Checks the isolated JMeter bridge and plugin archive size."
     dependsOn(tasks.buildPlugin)
 
     doLast {
         val archive = tasks.buildPlugin.get().archiveFile.get().asFile
         ZipFile(archive).use { zip ->
-            val forbidden = zip.entries().asSequence()
-                .map { it.name.substringAfterLast('/') }
+            val root = intellij.pluginName.get()
+            val entries = zip.entries().asSequence().map { it.name }.toList()
+            val pluginLibraries = entries
+                .filter { it.startsWith("$root/lib/") && it.endsWith(".jar") }
+            check(pluginLibraries.size == 1 && pluginLibraries.single().substringAfterLast('/').contains(root)) {
+                "Plugin lib must contain only the plugin jar: ${pluginLibraries.joinToString()}"
+            }
+
+            val bridges = entries
+                .filter { it.startsWith("$root/jmeter-bridge/") && it.endsWith(".jar") }
+            check(bridges.size == 1) {
+                "Expected exactly one JMeter compatibility bridge: ${bridges.joinToString()}"
+            }
+            check(bridges.single().substringAfterLast('/') == "ApacheJMeter_core-$jmeterVersion.jar") {
+                "Unexpected JMeter bridge: ${bridges.single()}"
+            }
+
+            val bundledHome = entries.filter { it.startsWith("$root/jmeter-home/") }
+            check(bundledHome.isEmpty()) {
+                "Plugin still bundles a JMeter home: ${bundledHome.joinToString()}"
+            }
+
+            val forbidden = entries
+                .filter { it.startsWith("$root/lib/") }
+                .map { it.substringAfterLast('/') }
                 .filter {
-                    it.startsWith("kotlin-stdlib") ||
+                    it.startsWith("ApacheJMeter") ||
+                        it.startsWith("slf4j-") ||
+                        it.startsWith("log4j-") ||
+                        it.startsWith("xerces") ||
+                        it.startsWith("xml-apis") ||
+                        it.startsWith("kotlin-stdlib") ||
                         it.startsWith("kotlinx-coroutines")
                 }
                 .toList()
             check(forbidden.isEmpty()) {
-                "Plugin bundles IntelliJ-owned Kotlin libraries: ${forbidden.joinToString()}"
+                "Plugin bundles runtime libraries outside the isolated bridge: ${forbidden.joinToString()}"
+            }
+
+            val maximumArchiveBytes = 5L * 1024L * 1024L
+            check(archive.length() <= maximumArchiveBytes) {
+                "Plugin archive is ${archive.length()} bytes; maximum is $maximumArchiveBytes"
             }
         }
     }

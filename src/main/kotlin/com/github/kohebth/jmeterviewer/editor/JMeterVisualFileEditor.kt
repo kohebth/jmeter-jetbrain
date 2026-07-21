@@ -1,6 +1,8 @@
 package com.github.kohebth.jmeterviewer.editor
 
 import com.github.kohebth.jmeterviewer.ide.JMeterFileEditorProvider
+import com.github.kohebth.jmeterviewer.ide.JMeterSettingsConfigurable
+import com.github.kohebth.jmeterviewer.runtime.JMeterSettings
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -13,6 +15,7 @@ import com.intellij.openapi.fileEditor.FileEditorState
 import com.intellij.openapi.fileEditor.FileEditorStateLevel
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.vfs.VirtualFile
@@ -71,7 +74,7 @@ class JMeterVisualFileEditor(
         }
     }
 
-    internal fun showLoadError(message: String) {
+    internal fun showLoadError(message: String, offerConfiguration: Boolean = false) {
         host.removeAll()
         val content = JPanel(BorderLayout(0, 12))
         content.add(
@@ -79,6 +82,11 @@ class JMeterVisualFileEditor(
             BorderLayout.CENTER,
         )
         val actions = JPanel(FlowLayout(FlowLayout.LEADING, 8, 0))
+        if (offerConfiguration) {
+            actions.add(JButton("Configure JMeter").apply {
+                addActionListener { configureJMeter() }
+            })
+        }
         actions.add(JButton("Retry").apply {
             addActionListener { workspaceService.retry(this@JMeterVisualFileEditor) }
         })
@@ -131,6 +139,19 @@ class JMeterVisualFileEditor(
             OpenFileDescriptor(project, virtualFile),
             true,
         )
+    }
+
+    private fun configureJMeter() {
+        ShowSettingsUtil.getInstance().showSettingsDialog(
+            project,
+            JMeterSettingsConfigurable::class.java,
+        )
+        val configuredHome = ApplicationManager.getApplication()
+            .getService(JMeterSettings::class.java)
+            .jmeterHome
+        if (configuredHome.isNotEmpty()) {
+            workspaceService.retry(this)
+        }
     }
 
     private fun removeFromParent(component: Component) {
