@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.github.kohebth"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.3-SNAPSHOT"
 
 repositories {
     mavenCentral()
