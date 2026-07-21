@@ -20,6 +20,10 @@ internal data class JMeterInstallation private constructor(
 
     companion object {
         const val SUPPORTED_VERSION: String = "5.6.3"
+        private val SUPPORTED_CORE_JAR_NAMES = setOf(
+            "ApacheJMeter_core.jar",
+            "ApacheJMeter_core-$SUPPORTED_VERSION.jar",
+        )
 
         fun validate(candidate: Path): JMeterInstallation {
             val home = candidate.toAbsolutePath().normalize()
@@ -57,18 +61,24 @@ internal data class JMeterInstallation private constructor(
                 )
             }
 
-            val core = extensionDirectory.resolve("ApacheJMeter_core-$SUPPORTED_VERSION.jar")
-            if (!Files.isRegularFile(core)) {
-                val detectedCores = jarFiles(extensionDirectory)
+            val extensionJars = jarFiles(extensionDirectory)
+            val core = extensionJars.firstOrNull { path ->
+                val name = path.fileName.toString()
+                SUPPORTED_CORE_JAR_NAMES.any { expected ->
+                    name.equals(expected, ignoreCase = true)
+                }
+            }
+            if (core == null) {
+                val detectedCores = extensionJars
                     .map { it.fileName.toString() }
-                    .filter { it.startsWith("ApacheJMeter_core-") }
+                    .filter { it.startsWith("ApacheJMeter_core", ignoreCase = true) }
                 val detail = if (detectedCores.isEmpty()) {
                     "No ApacheJMeter_core jar was found"
                 } else {
                     "Found ${detectedCores.joinToString()}"
                 }
                 throw JMeterConfigurationException(
-                    "Missing lib/ext/${core.fileName} in $home. $detail.",
+                    "Missing lib/ext/ApacheJMeter_core.jar in $home. $detail.",
                 )
             }
 

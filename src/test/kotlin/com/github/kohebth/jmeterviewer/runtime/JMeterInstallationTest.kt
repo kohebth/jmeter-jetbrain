@@ -32,6 +32,20 @@ class JMeterInstallationTest {
     }
 
     @Test
+    fun acceptsAVersionedCoreJar(@TempDir home: Path) {
+        val coreName = "ApacheJMeter_core-${JMeterInstallation.SUPPORTED_VERSION}.jar"
+        val files = createInstallation(
+            home,
+            JMeterInstallation.SUPPORTED_VERSION,
+            coreName,
+        )
+
+        val installation = JMeterInstallation.validate(home)
+
+        assertEquals(files.core, installation.coreJar)
+    }
+
+    @Test
     fun rejectsAnUnsupportedJMeterVersion(@TempDir home: Path) {
         createInstallation(home, "5.6.2")
 
@@ -68,14 +82,18 @@ class JMeterInstallationTest {
         assertTrue(failure.message.orEmpty().contains("not a directory"))
     }
 
-    private fun createInstallation(home: Path, version: String): InstallationFiles {
+    private fun createInstallation(
+        home: Path,
+        version: String,
+        coreName: String = "ApacheJMeter_core.jar",
+    ): InstallationFiles {
         val bin = Files.createDirectories(home.resolve("bin"))
         Files.createDirectories(home.resolve("lib/ext"))
         Files.createDirectories(home.resolve("lib/junit"))
         Files.writeString(bin.resolve("jmeter.properties"), "# test\n")
         Files.writeString(bin.resolve("saveservice.properties"), "_version=5.0\n")
         val launcher = versionedJar(bin.resolve("ApacheJMeter.jar"), version)
-        val core = emptyJar(home.resolve("lib/ext/ApacheJMeter_core-$version.jar"))
+        val core = emptyJar(home.resolve("lib/ext/$coreName"))
         return InstallationFiles(launcher, core)
     }
 
